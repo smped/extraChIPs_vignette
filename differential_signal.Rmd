@@ -184,7 +184,7 @@ consensus_dht <- peaks %>%
 We can also inspect these using `plotOverlaps()` provided we use a `GRangesList`
 for the input.
 
-```{r venn-consensus-overlap, fig.cap = "*Overlap between consensus peaks identified in a treatment-specific manner*"}
+```{r venn-consensus-overlap, fig.width=8, fig.cap = "*Overlap between consensus peaks identified in a treatment-specific manner*"}
 GRangesList(
   Veh = granges(consensus_veh), DHT = granges(consensus_dht)
 ) %>% 
