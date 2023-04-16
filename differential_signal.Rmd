@@ -41,6 +41,10 @@ The majority of examples below use heavily reduced datasets to provide
 general guidance on using the functions.
 Some results may appear trivial as a result, but will hopefully prove far more
 useful in a true experimental context.
+All data, along with this vignette are available 
+[here](https://github.com/smped/extraChIPs_vignette).
+Please place all contents of the data directory in a directory named data in 
+your own working directory.
 
 # Setup 
 
@@ -57,7 +61,7 @@ if (!"BiocManager" %in% rownames(installed.packages()))
   install.packages("BiocManager")
 pkg <- c(
   "tidyverse", "Rsamtools", "csaw", "BiocParallel", "rtracklayer", "edgeR", 
-  "patchwork", "extraChIPs", "plyranges", "scales"
+  "patchwork", "extraChIPs", "plyranges", "scales", "ggside"
 )
 BiocManager::install(pkg, update = FALSE)
 ```
@@ -75,6 +79,7 @@ library(patchwork)
 library(extraChIPs)
 library(plyranges)
 library(scales)
+library(ggside)
 ```
 
 
@@ -82,7 +87,8 @@ library(scales)
 
 All data for this vignette is expected to be in a sub-directory of the working 
 directory named "data", and all paths will be predicated on this.
-Please ensure you have all data in this location.
+Please ensure you have all data in this location, obtained from 
+[here](https://github.com/smped/extraChIPs_vignette).
 
 The data itself is ChIP-Seq data targeting the histone mark H3K27ac, and is 
 taken from the cell-line MDA-MB-453 under Vehicle and DHT-stimulated conditions.
@@ -116,7 +122,7 @@ peaks <- importPeaks(peakFiles, seqinfo = grch37)
 ```
 
 This will import the peaks from all files as a single `GRangesList` object, 
-adding the filename to each element by default.
+adding the file-name to each element by default.
 We can easily modify these names if we so wish.
 
 ```{r change-names}
@@ -125,7 +131,7 @@ names(peaks) <- str_remove_all(names(peaks), "_peaks.narrowPeak")
 
 Once loaded, we can easily check how similar our replicates are.
 
-```{r plot-overlaps, fig.cap = "UpSet plot showing overlapping peaks across all replicates"}
+```{r plot-overlaps, fig.height=6, fig.cap = "*UpSet plot showing overlapping peaks across all replicates*"}
 plotOverlaps(peaks, min_size = 10, .sort_sets = FALSE)
 ```
 
@@ -135,7 +141,7 @@ In the following, we'll show the maximum score obtained, highlighting that for
 peaks identified in only one or two replicates, the overall signal intensity is
 generally lower.
 
-```{r plot-overlaps-score, fig.cap = "UpSet plot showing overlapping peaks across all replicates, with the maximum score across all replicates shown in the upper panel."}
+```{r plot-overlaps-score, fig.cap = "*UpSet plot showing overlapping peaks across all replicates, with the maximum score across all replicates shown in the upper panel.*"}
 plotOverlaps(peaks, min_size = 10, .sort_sets = FALSE, var = "score", f = "max")
 ```
 
@@ -178,7 +184,7 @@ consensus_dht <- peaks %>%
 We can also inspect these using `plotOverlaps()` provided we use a `GRangesList`
 for the input.
 
-```{r venn-consensus-overlap, fig.cap = "Overlap between consensus peaks identified in a treatment-specific manner"}
+```{r venn-consensus-overlap, fig.cap = "*Overlap between consensus peaks identified in a treatment-specific manner*"}
 GRangesList(
   Veh = granges(consensus_veh), DHT = granges(consensus_dht)
 ) %>% 
@@ -201,6 +207,16 @@ all_consensus <- GRangesList(
 # Differential Signal Analysis
 
 ## Sliding Windows
+
+The standard approach of tools such as DiffBind [@DiffBind2012] is to take a set
+of peaks, re-centre them, then set all regions to be the same width.
+From there, data is passed to `edgeR` [@edgeR2016] or `DESeq2` [@DESeq22014]
+for analysis.
+Whilst this approach can be replicated using the defined peaks above, the 
+suggested approach for `extraChIPs` is to us sliding windows, as per `csaw`.
+The resultant *variable width regions* can be particularly advantageous for ChIP 
+targets such as H3K27ac where regions marked by histone-acetylation can vary 
+greatly in size.
 
 The starting point for differential signal analyses using `extraChIPs` is to 
 define a set of sliding windows across the genome, then count reads from a set 
@@ -284,7 +300,7 @@ binding, where long stretches are unbound.
 The windows with higher counts tend to be associated with the samples targeting
 a transcription factor (TF), as seen in the two treatment group samples.
 
-```{r plot-densities, fig.cap = "Read Densities for all returned windows across all samples"}
+```{r plot-densities, fig.cap = "*Read Densities for all returned windows across all samples*"}
 plotAssayDensities(wincounts, colour = "treat", trans = "log1p") +
   theme_bw()
 ```
@@ -340,7 +356,7 @@ assays(filtcounts)
 We can once again check our signal distributions, this time on the logCPM 
 values.
 
-```{r plotcpm, fig.cap = "Densities for logCPM values across all samples after discarding windows less likely to contain signal from our ChIP target"}
+```{r plotcpm, fig.cap = "*Densities for logCPM values across all samples after discarding windows less likely to contain H3K27ac signal*"}
 plotAssayDensities(filtcounts, assay = "logCPM", colour = "treat") +
   scale_colour_brewer(palette = "Set1") +
   theme_bw()
@@ -367,7 +383,7 @@ given ChIP target.
 Here, however, there is minimal difference between the two approaches as H3K27ac 
 signal tends to be broadly consistent between these treatment groups.
 
-```{r plot-assay-rle, fig.cap = "RLE plots across all samples (A) and with values calculated within treatment groups (B)."}
+```{r plot-assay-rle, fig.height=7, fig.cap = "*RLE plots across all samples (A) and with values calculated within treatment groups (B).*"}
 a <- plotAssayRle(filtcounts, assay = "logCPM", fill = "treat") +
   geom_hline(yintercept = 0, linetype = 2, colour = "grey") +
   scale_fill_brewer(palette = "Set1") +
@@ -388,7 +404,7 @@ We can also check the samples using a PCA plot, again colouring the points by
 treatment group and adding labels, which will repel by default if the points are 
 shown.
 
-```{r plot-pca}
+```{r plot-pca, fig.height=6, fig.width=8, fig.cap = "*PCA plot based on the logCPM assay*"}
 plotAssayPCA(filtcounts, "logCPM", colour = "treat", label = "sample") +
   scale_colour_brewer(palette = "Set1") +
   theme_bw()
@@ -451,7 +467,7 @@ A representative window, corresponding to the original window with the lowest
 p-value is returned.
 
 ```{r merge-by-hmp}
-results_gr <- mergeByHMP(fit_gr, inc_cols = "overlaps_ref")
+results_gr <- mergeByHMP(fit_gr, inc_cols = "overlaps_ref", merge_within = 120)
 results_gr$status <- case_when(
   results_gr$hmp_fdr > 0.05 ~ "Unchanged",
   results_gr$logFC > 0 ~ "Increased",
@@ -466,6 +482,21 @@ A particularly beneficial feature of this approach is that the final ranges
 will be of highly variable width, with this select region of chromosome 10 
 producing merged windows ranging from `r min(width(results_gr))` to 
 `r max(width(results_gr))`bp, as may be expected for H3K27ac signal.
+
+We can also quickly check out results using a heatmap across the retained 
+windows which correspond to our results for differential signal, although this
+will not provide any specific genomic context.
+
+```{r plot-assay-heatmap, fig.cap = "*Heatmap showing retained sliding windows whih correspond to the most highly-ranked region for differential signal.*"}
+filtcounts %>%
+  subsetByOverlaps(subset(results_gr, hmp == min(hmp))) %>%
+  plotAssayHeatmap(assay = "logCPM", ysideline = TRUE, yside_col = "treat") +
+  scale_fill_viridis_c() +
+  scale_colour_brewer(palette = "Set1") +
+  scale_ysidex_continuous(expand = expansion(0.1), minor_breaks = NULL) +
+  theme_bw()
+```
+
 
 ## Mapping of Windows To Genes
 
@@ -519,9 +550,7 @@ the regions directly overlapping a TSS for all transcripts within this region
 of the genome.
 
 ```{r map-to-genes}
-results_gr <- mapByFeature(
-  gr = results_gr, genes = genes, prom = regions$promoters
-)
+results_gr <- mapByFeature(results_gr, genes = genes, prom = regions$promoters)
 ```
 
 Now we have our regions showing changed signal along with the likely regulatory 
@@ -529,7 +558,7 @@ targets.
 Our top-ranked region is as follows, and this appears to be associated with the 
 gene *`r arrange(results_gr, hmp)$gene_name[[1]]`*.
 
-```{r}
+```{r top-ranked}
 arrange(results_gr, hmp)[1]
 ```
 
@@ -541,12 +570,13 @@ First, we'll arrange our regions to be a single `GRanges` object with the column
 "region".
 From these we cn simply add the column `bestRegion`
 
-```{r}
+```{r map-to-regions}
 regions_gr <- regions %>% 
   lapply(select, region) %>% 
   GRangesList() %>% 
   unlist() %>% 
-  sort()
+  sort() %>% 
+  setNames(NULL)
 region_levels <- vapply(regions, function(x) x$region[1], character(1))
 results_gr$bestRegion <- results_gr %>% 
   bestOverlap(regions_gr, var = "region") %>% 
@@ -573,7 +603,7 @@ However, given the default plots can often be slightly unsatisfactory,
 `plotPie()` is heavily customisable, in particular taking advantage of the 
 `glue` syntax to customise labels.
 
-```{r plot-pie}
+```{r plot-pie, fig.width=8, fig.height=6, fig.cap = "*Pie chart showing the best overlapping region for each merged windows. The best overlap is determined simply by the region with the lergest amount of overlap.*"}
 results_gr %>% 
   plotPie(
     fill = "bestRegion", min_p = 0.05, total_size = 5,
@@ -582,14 +612,26 @@ results_gr %>%
   )
 ```
 
-We can also scale by width, in which case returned values default to KB.
+We can also scale by additional columns.
+Here, we'll find the proportion of each window which overlaps each type of 
+region, providing a complete summary of the proportion of our ranges which 
+overlaps each feature.
 
-```{r plot-pie-width}
-results_gr %>% 
+```{r plot-pie-width, fig.width=8, fig.height=6, fig.cap = "*Pie chart with regions scaled by width to show the proportions of the total regions which overlap each type of annotated region.*"}
+regions %>% 
+  lapply(function(x) propOverlap(results_gr, x)) %>% 
+  as_tibble() %>% 
+  mutate(range = as.character(results_gr)) %>% 
+  pivot_longer(cols = names(regions), names_to = "region", values_to = "p") %>% 
+  dplyr::filter(p > 0) %>% 
+  mutate(
+    region = fct(region_levels[region], levels = region_levels),
+    w = p * width(GRanges(range)) / 1e3
+  ) %>% 
   plotPie(
-    scale_by = "width", fill = "bestRegion", min_p = 0.05,
-    total_glue = "{N}kb", total_size = 5,
-    cat_glue = "{str_wrap(bestRegion, 10)}\n{percent(p, 0.1)}",
+    scale_by = "w", fill = "region", min_p = 0.05,
+    total_glue = "{round(N, 1)}kb", total_size = 5,
+    cat_glue = "{str_wrap(region, 10)}\n{percent(p, 0.1)}",
     cat_alpha = 0.5, cat_size = 4
   )
 ```
@@ -607,22 +649,20 @@ Again, this plot is heavily customisable, and is able to utilise separate
 palettes for the inner and outer rings if preferred.
 Specific slices can also be *exploded* for emphasis.
 
-```{r plot-split-donut}
+```{r plot-split-donut, fig.cap = "*Summary of regions with changed signal and the annotated region with the largest overlap*"}
+region_col <- hcl.colors(length(region_levels), "Viridis", rev = TRUE)
 results_gr %>% 
   subset(status != "Unchanged") %>% 
   plotSplitDonut(
     inner = "status", outer = "bestRegion", min_p = 0.01,
-    inner_palette = c(rgb(0.2, 0.2, 0.9), rgb(0.8, 0.2, 0.3)),
-    outer_palette = hcl.colors(length(region_levels), "Zissou1"),
+    inner_palette = c("#3333E6", "#E6334D"),
+    outer_palette = region_col,
     inner_glue = "H3K27ac\n{status}\n{n}", inner_label_alpha = 0.8,
     outer_glue = "{str_wrap(bestRegion, 10)}\n{n}", outer_label = "text",
     explode_outer = "Promoter", explode_r = 0.2
   ) 
 ```
 
-```{r}
-knitr::opts_chunk$set(eval = FALSE)
-```
 
 
 ## Profile Heatmaps
@@ -638,19 +678,66 @@ or excluded as desired.
 First we need to define a `BigWigFileList` as these are conventionally very 
 large files which shouldn't be retained in memory, but are just accessed to
 import the key regions for a particular process.
+Typically, these can be generated during peak calling but they can also be 
+created directly from `bam` files if needed.
+Once again, our reduced dataset makes this trivial, but the process may require 
+significant computation resources if being performed on a complete dataset.
+In the following, we'll create the BigWig files an immediately create our 
+`BigWigFileList`.
 
-```{r bwfl}
-bwfl <- system.file(
-  "extdata", "bigwig", c("ex1.bw", "ex2.bw"), package = "extraChIPs"
-) %>% 
-  BigWigFileList() %>% 
-  setNames(c("ex1", "ex2"))
+```{r make-bwfl}
+sbp <- ScanBamParam(which = GRanges("chr10:40000000-100000000"))
+## Sum the coverage across all Vehicle samples then create a merged BigWig
+cov_veh <- names(bfl) %>% 
+  str_subset("Veh") %>% 
+  lapply(function(x) coverage(bfl[[x]], param = sbp)$chr10) %>% 
+  RleList() %>% 
+  unlist()
+cov_veh <- GRanges(RleList(chr10 = cov_veh))
+export(cov_veh, "data/Veh_merged.bw")
+## Repeat for DHT
+cov_dht <- names(bfl) %>% 
+  str_subset("DHT") %>% 
+    lapply(function(x) coverage(bfl[[x]], param = sbp)$chr10) %>% 
+  RleList() %>% 
+  unlist()
+cov_dht <- GRanges(RleList(chr10 = cov_dht))
+export(cov_dht, "data/DHT_merged.bw")
+bwfl <- BigWigFileList(
+  list(Veh = "data/Veh_merged.bw", DHT = "data/DHT_merged.bw")
+)
 ```
 
-Now we have our `BigWigFileList` we can define the profile data
+Now we have our `BigWigFileList` we can define the ranges to plot along with the
+profile data.
+In order to find the region within each range with the maximal signal, we'll 
+compare back to the original results before windows were merged, then return 
+the original window with the maximal signal (i.e. logCPM).
+Note that we already had the windows in "keyval_range" which corresponded to 
+the ranges with the most statistically significant change.
+Realistically we can choose any strategy for centring ranges that we wish.
+
+```{r get-max-ranges}
+gr_increase <- subset(results_gr, status == "Increased")
+max_peaks <- gr_increase %>%
+  granges() %>%
+  join_overlap_left(
+    mutate(fit_gr, window = as.character(fit_gr))
+  ) %>% 
+    arrange(1/logCPM) %>% 
+    distinctMC(.keep_all = TRUE) %>% 
+    colToRanges("window") %>% 
+    granges()
+```
+
+Now we've found the original windows with the strongest signal, we can define 
+the profile data using the surrounding regions.
+Our widest region with significant change in signal is 
+`r max(width(subset(results_gr, status == "Increased")))`bp, so let's set our 
+profiles to be created stretching 10kb either side of the peak centre.
 
 ```{r get-profile}
-pd <- getProfileData(bwfl, results_gr)
+pd <- getProfileData(bwfl, max_peaks, upstream = 1e4, log = FALSE)
 pd
 ```
 
@@ -663,44 +750,19 @@ We can then simply plot this data by specifying this column in the function
 customised in the conventional manner.
 Here, we'll add a colour scale and `theme_bw()`
 
-```{r profile-heatmap}
+```{r profile-heatmap, fig.cap = "*Profile Heatmap of the regions on chromosome 10 showing evidence for increased H3K27ac signal. Regions are centred at the point of maximal signal.*"}
 plotProfileHeatmap(pd, "profile_data") +
-  scale_fill_viridis_c() +
-  labs(fill = "CPM") +
+  scale_fill_gradient(low = "white", high = "red") +
+  labs(fill = "Counts") +
   theme_bw()
 ```
 
-In our initial merging of sliding windows we chose our representative values to
-be from the sliding window with the highest signal.
-This may not be at the centre of the final merged window, but having retained 
-this in the `keyval_range` column, we can use this range for generation of
-the profile data, ensuring we have our profile heatmaps centred at the point
-of the highest signal.
-
-```{r centred-heatmap}
-pd <- getProfileData(bwfl, colToRanges(results_gr, "keyval_range"))
-plotProfileHeatmap(pd, "profile_data")  +
-  scale_fill_viridis_c() +
-  labs(fill = "CPM") +
-  theme_bw()
-```
-
-As we're using `ggplot2` we can also separate peaks by any of the categorical
-columns in our initial ranges, such as the `overlaps_ref` column.
-This will not only create facets along the y-axis, but the traces for each panel
-are drawn separately for each facet, and these can be simply assigned colours or 
-linetype using standard `ggplot2` syntax.
-
-```{r facet-heatmap}
-plotProfileHeatmap(
-  pd, "profile_data", facetY = "overlaps_ref", linetype = "overlaps_ref"
-)  +
-  scale_fill_viridis_c() +
-  scale_colour_manual(values = c("red", "black")) +
-  labs(fill = "CPM") +
-  theme_bw()
-```
-
+Note that H3K27ac often contains regions with significantly lower signal where 
+the transcriptional machinery is instead occupying the DNA and as such, H3K27ac 
+peaks are often centred using peaks from an additional transcription factor.
+Here, we've also just plotted raw counts.
+`macs2` is able to produce BigWigFiles containing logCPM values, or enrichment 
+over input and these are often used in preference to raw counts.
 
 ## Inspection of Ranges
 
@@ -711,157 +773,92 @@ The function `plotHFGC()` provides a simple, standardised layout using the
 visualisation tools from `Gviz`.
 If supplied, tracks will be drawn in the order 1) HiC; 2) Features; 3) Genes, 
 and 4) Coverage.
+All tracks are optional, and if none are provided a simply cytogenetic plot will
+be produced.
 Whilst a simple and intuitive function to use, it also provides a great deal of 
 flexibility for advanced customisation.
-All plots require a `GRanges` object to define the plotting region, with all 
-other tracks being optional.
+All plots require a `GRanges` object to define the plotting region along with a 
+set of cytogenetic bands.
+These are provided in the package for GRCh37 and GRCh38.
 
-### Displaying Genes
 
-Let's start by plotting the entire region contained in `results_gr` using the 
-minimal data possible, a `GRanges` object and some cytogenetic bands.
+Let's start by plotting the first promoter showing changed signal in 
+`results_gr` using the minimal data possible.
+This is a `GRanges` object and some cytogenetic bands.
 
-```{r plot-empty-hfgc}
+```{r plot-empty-hfgc, fig.height=6, fig.cap = "*Basic output from plotHFGC without any of the optional tracks*"}
 data("grch37.cytobands")
-gr <- range(results_gr)
+gr <- results_gr %>%
+  subset(hmp_fdr < 0.05) %>% 
+  subset(vapply(gene_name, function(x) "PRXL2A" %in% x, logical(1))) %>% 
+  subset(logCPM == max(logCPM))
 plotHFGC(gr, cytobands = grch37.cytobands)
 ```
 
-This is clearly of minimal interest, so let's add some transcript models.
+### Including Coverage
+
+In order to show our changed signal in context we can show the coverage using a
+`BigWigFileList` as for the Profile Heatmap.
+If providing a `BigWigFileList`, separate tracks will drawn for each element of 
+the object.
+In more complex scenarios where multiple targets are required a list of 
+`BigWigFileList`s can be provided and each element will then be drawn as a track 
+with overlapping coverage within each BigWigFileList.
+Colours need to be provided in the identical structure to match the provided 
+object.
+Here, we've provided a single `BigWigFileList` so we can provide a simple list 
+matching the names within the `BigWigFileList.`
+
+```{r plot-hfgc-coverge, fig.height=6, fig.cap = "*Coverage for the region of interest, shown with a blue highlight. Note how the counts are lower in the highlighted region for the merged Veh coverage track.*"}
+plotHFGC(
+  gr, cytobands = grch37.cytobands, 
+  coverage = bwfl, linecol = list("Veh" = "grey30", "DHT" = "darkred"),
+  zoom = 30
+)
+```
+
+
+### Displaying Genes
+
+Next we might like to add gene models to provide the regulatory context.
 These are supplied here in the layout required by the defaults of the 
 `GeneRegionTrack()` function, with all exons and transcripts annotated.
 
-```{r add-genes}
-data("ex_trans")
-plotHFGC(gr, genes = ex_trans, cytobands = grch37.cytobands)
-```
-
-As these are collapsed into *meta-transcripts* by default, let's 1) add colour, 
-2) expand transcripts, and 3) zoom out a little.
-The initial range is highlighted by default, but this can also be turned off if
-preferred.
-
-```{r plot-trans}
+```{r add-genes, fig.cap = "*Coverage for our region showing the relationship of signal to annotated genes*"}
+gene_models <- read_rds("data/chr10_trans_subset.rds")
 plotHFGC(
-  gr, 
-  genes = ex_trans, genecol = "wheat",
-  collapseTranscripts = FALSE,
-  cytobands = grch37.cytobands, zoom = 1.2
+  gr, cytobands = grch37.cytobands, 
+  coverage = bwfl, linecol = list("Veh" = "grey30", "DHT" = "darkred"),
+  genes = gene_models, genecol = "wheat",
+  zoom = 30
 )
 ```
-
-The object `ex_trans` contains the column `status`, and we might like to use 
-this to display these genes on separate tracks.
-In this case, we would pass a `GRangesList` to the `genes` argument, and each 
-element within that list will be drawn as a separate track.
-
-- Colours should be provided as a *named* list with on element for each element
-of the genes `GRangesList`, or as a single colour
-- `collapseTranscripts` can also be provided as a matching (`*named*) list with 
-each element being applied to the respective track, or as a single value
-
-```{r split-trans}
-status_trans <- splitAsList(ex_trans, ex_trans$status)
-plotHFGC(
-  gr, 
-  genes = status_trans, 
-  genecol = list(Up = "forestgreen", Unchanged = "grey", Undetected = "grey80"),
-  collapseTranscripts = list(Up = FALSE, Unchanged = FALSE, Undetected = "meta"),
-  cytobands = grch37.cytobands, zoom = 1.2
-)
-```
-
-This idea of providing a matching *named* list is applied across the genes, 
-features and coverage tracks in the sections below.
 
 ### Adding Features
 
-Another useful track to add might be some key features such as promoters.
-Unlike the genes track, features must **always** be a `GRangesList`, with each
-element defining a different type of feature.
-Given that we only have promoters, we'll still need to set this up as a 
-`GRangesList`
+Another useful track to add might be some key features such as promoters and 
+other annotated regions.
+Features must **always** be a `GRangesList`, with each element defining a 
+different type of feature, as we already have in our `regions_gr` object.
 
-
-```{r plot-hfgc}
-data("ex_prom")
-feat_grl <- GRangesList(Promoters = ex_prom)
+```{r plot-hfgc, fig.cap = "*The same figure as previously, but with annotated regions added as features. Any type of feature can be added here.*"}
+region_grl <- splitAsList(regions_gr, regions_gr$region)[region_levels]
+names(region_col) <- region_levels
 plotHFGC(
-  gr, 
-  features = feat_grl, featcol = list(Promoters = "red"),
-  genes = status_trans, 
-  genecol = list(Up = "forestgreen", Unchanged = "grey", Undetected = "grey80"),
-  collapseTranscripts = list(Up = FALSE, Unchanged = FALSE, Undetected = "meta"),
-  cytobands = grch37.cytobands, zoom = 1.2
+  gr, cytobands = grch37.cytobands, 
+  features = region_grl, featcol = region_col, featstack = "dense",
+  coverage = bwfl, linecol = list("Veh" = "grey30", "DHT" = "darkred"),
+  genes = gene_models, gene_col = "wheat",
+  zoom = 30
 )
 ```
 
 
 ### Adding HiC Interactions
 
-Adding the HiC Interactions becomes very simple.
-All that we need is a GInteractions object.
-
-```{r plot-with-hic}
-plotHFGC(
-  gr, 
-  hic = ex_hic,
-  features = feat_grl, featcol = list(Promoters = "red"),
-  genes = status_trans, 
-  genecol = list(Up = "forestgreen", Unchanged = "grey", Undetected = "grey80"),
-  collapseTranscripts = list(Up = FALSE, Unchanged = FALSE, Undetected = "meta"),
-  cytobands = grch37.cytobands, zoom = 1.2
-)
-```
-
-If interactions extend beyond the plot range (`gr`), the plotting range will be 
-automatically extended to incorporate all interactions.
-Given these can extend to a very long distance, only interactions within 10Mb
-are included by default.
-This can be modified using the `max` argument.
-
-### Adding Peaks/Coverage
-
-The simplest approach to adding coverage is to simply provide a single 
-`BigWigFileList`.
-In this scenario, each individual file will be drawn on a separate track.
-Colours for lines are passed as a simple vector/list with names matching the
-names of the `BigWigFileList`.
-
-```{r plot-with-coverage}
-plotHFGC(
-  gr, 
-  hic = ex_hic,
-  features = feat_grl, featcol = list(Promoters = "red"),
-  genes = status_trans, 
-  coverage = bwfl, linecol = c(ex1 = "#4B0055", ex2 = "#007094"),
-  genecol = list(Up = "forestgreen", Unchanged = "grey", Undetected = "grey80"),
-  collapseTranscripts = list(Up = FALSE, Unchanged = FALSE, Undetected = "meta"),
-  cytobands = grch37.cytobands, zoom = 1.2
-)
-```
-
-Alternatively, by providing a list of `BigWigFileList` objects, each list 
-element will be drawn as a single overlaid track.
-In this way, unlimited coverage tracks can effectively be drawn.
-
-If choosing this option, colours must again be passed as a matching, *named* 
-list.
-
-```{r plot-with-tracks}
-cov_list <- list(TF1 = bwfl)
-plotHFGC(
-  gr, 
-  hic = ex_hic,
-  features = feat_grl, featcol = list(Promoters = "red"),
-  genes = status_trans, 
-  coverage = cov_list, 
-  linecol = list(TF1 = c(ex1 = "#4B0055", ex2 = "#007094")),
-  genecol = list(Up = "forestgreen", Unchanged = "grey", Undetected = "grey80"),
-  collapseTranscripts = list(Up = FALSE, Unchanged = FALSE, Undetected = "meta"),
-  cytobands = grch37.cytobands, zoom = 1.2
-)
-```
+If long-range interactions are available, these can also be provided as a 
+GenomicInteractions object, completing all available options for the HFGC 
+components.
 
 ### Adding Annotations To Coverage
 
@@ -877,8 +874,7 @@ For each coverage track being annotated, a `GRangesList` object can denote the
 ranges which can be assigned different colours.
 
 ```{r cov-annot}
-cov_annot <- splitAsList(results_gr, results_gr$logFC < -1) %>% 
-  setNames(c("Unchanged", "Decreased")) %>% 
+cov_annot <- splitAsList(results_gr, results_gr$status) %>% 
   endoapply(granges)
 ```
 
@@ -887,81 +883,22 @@ In keeping with the approach of having a matching list element for every
 coverage track, we would need to pass this as a list which matched the 
 coverage track
 
-```{r plot-annot}
+```{r plot-annot, fig.cap = "*The addition of an annotation track for the coverage tracks shows which regions were retained during the analysis, as well as those which were considered as showing changed or unchanged signal.*"}
 plotHFGC(
   gr, 
-  hic = ex_hic,
-  features = feat_grl, featcol = list(Promoters = "red"),
-  genes = status_trans, 
-  coverage = cov_list, 
-  annotation = list(TF1 = cov_annot), 
-  annotcol = c(Unchanged = "grey", Decreased = "#3333CC"),
-  linecol = list(TF1 = c(ex1 = "#4B0055", ex2 = "#007094")),
-  genecol = list(Up = "forestgreen", Unchanged = "grey", Undetected = "grey80"),
-  collapseTranscripts = "meta",
-  cytobands = grch37.cytobands, zoom = 1.2
+  features = region_grl, featcol = region_col, featstack = "dense",
+  genes = gene_models, genecol = "wheat",
+  coverage = bwfl, linecol = list("Veh" = "grey30", "DHT" = "darkred"),
+  annotation = cov_annot, 
+  annotcol = c(Unchanged = "grey", Decreased = "#3333E6", Increased = "#E6334D"),
+  cytobands = grch37.cytobands, zoom = 30
 )
 ```
 
 Plots are able to be tweaked considerably further via multiple parameters, 
-however these basic approaches cover the elemental functionality of `plotHFCG()`
+however these basic approaches cover the core functionality of `plotHFCG()`
 for enabling simple & reproducible plotting across regions for multiple sites
 within a larger experiment.
-
-## Comparison Across Replicates Or Experiments
-
-Summaries about eh relationship between multiple ChIP-Seq replicates, or even 
-sets of results, can form an important part of many analysis.
-In the case of comparing replicates, two options are possible using 
-`plotOverlaps()`.
-For 1-3 replicates Venn Diagrams are enabled, whilst UpSet plots are possible 
-for 2 or more replicates.
-
-```{r ex-grl}
-set.seed(100)
-grl <- GRangesList(
-  a = GRanges(c("chr1:1-10", "chr1:21-30", "chr1:31-40")),
-  b = GRanges(c("chr1:12-15", "chr1:21-30", "chr1:46-50"))
-)
-grl$a$score <- rnorm(3)
-grl$b$score <- rnorm(3)
-```
-
-During generation of these plots, ranges are reduced using 
-`GenomicRanges::reduce()` to ensure common ranges between replicates.
-
-```{r ex-plotoverlaps}
-plotOverlaps(grl)
-plotOverlaps(grl, type = "upset")
-```
-
-The gap width used for range reduction can also be passed through 
-`plotOverlaps()`, with the default being `min.gapwidth = 1L`.
-
-```{r ex-plotoverlaps-gapwidth}
-plotOverlaps(grl, type = "upset", min.gapwidth = 2)
-```
-
-In the case of UpSet plots, a common value across replicates 
-(e.g. logCPM, score) can be averaged and a boxplot added as an additional panel
-above the conventional UpSet plot.
-
-```{r ex-plotoverlaps-upset}
-plotOverlaps(grl, type = "upset", var = "score")
-```
-
-When comparing results, it may simpler to pass character vectors of genes.
-
-```{r ex-plotoverlaps-genes}
-list(
-  mapped_to_target = unlist(results_gr_mapped$symbol),
-  de_genes = c("LDB1", "FOXA1", "ESR2")
-) %>% 
-  plotOverlaps()
-```
-
-Whilst this example is simple, larger datasets with multiple elements can be 
-easily explored in this manner.
 
 # References
 
