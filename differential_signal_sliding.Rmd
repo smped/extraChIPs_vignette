@@ -1,5 +1,5 @@
 ---
-title: "extraChIPs: Differential Signal Analysis"
+title: "extraChIPs: Differential Signal Using Sliding Windows"
 author:
 - name: Stevie Pederson
   affiliation: 
@@ -12,7 +12,7 @@ bibliography: '`r system.file("references.bib", package = "extraChIPs")`'
 output:
   github_document
 vignette: >
-  %\VignetteIndexEntry{Differential Signal Analysis}
+  %\VignetteIndexEntry{Differential Signal Analysis: Sliding Windows}
   %\VignetteEngine{knitr::rmarkdown}
   %\VignetteEncoding{UTF-8}
 ---
