@@ -1,0 +1,263 @@
+---
+title: "extraChIPs: Differential Signal Using Fixed-Width Windows"
+author:
+- name: Stevie Pederson
+  affiliation: 
+  - Black Ochre Data Laboratories, Telethon Kids Institute, Adelaide, Australia
+  - Dame Roma Mitchell Cancer Researc Laboratories, University of Adelaide
+  - John Curtin School of Medical Research, Australian National University
+  email: stephen.pederson.au@gmail.com
+package: extraChIPs
+bibliography: '`r system.file("references.bib", package = "extraChIPs")`'
+output:
+  github_document
+vignette: >
+  %\VignetteIndexEntry{Differential Signal Analysis}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r setup, echo=FALSE}
+knitr::opts_chunk$set(
+  message = FALSE, warning = FALSE, fig.height = 8, fig.width = 10
+)
+```
+
+# Introduction
+
+The [GRAVI](https://github.com/smped/GRAVI) workflow, for which this package 
+is designed, uses sliding windows for differential signal analysis.
+However, the use of fixed-width windows, as is common under DiffBind-style
+[@DiffBind2012] approaches is also possible with `extraChIPs`.
+This vignette focusses on using conventional peak calls and fixed-width 
+approaches to replicate and extend these approaches.
+
+The majority of examples below use heavily reduced datasets to provide
+general guidance on using the functions.
+Some results may appear trivial as a result, but will hopefully prove far more
+useful in a true experimental context.
+All data, along with this vignette are available 
+[here](https://github.com/smped/extraChIPs_vignette).
+Please place all contents of the data directory in a directory named data in 
+your own working directory.
+
+# Setup 
+
+## Installation
+
+In order to use the package `extraChIPs` and follow this vignette, we recommend 
+using the package `BiocManager` hosted on CRAN.
+Once this is installed, the additional packages required for this vignette 
+(`tidyverse`, `Rsamtools`, `csaw`, `BiocParallel` and `rtracklayer`) can also 
+be installed.
+
+```{r install, eval = FALSE}
+if (!"BiocManager" %in% rownames(installed.packages()))
+  install.packages("BiocManager")
+pkg <- c(
+  "tidyverse", "Rsamtools", "csaw", "BiocParallel", "rtracklayer", "edgeR", 
+  "patchwork", "extraChIPs", "plyranges", "scales", "ggside"
+)
+BiocManager::install(pkg, update = FALSE)
+```
+
+Once these packages are installed, we can load them easily
+
+```{r load-packages}
+library(tidyverse)
+library(Rsamtools)
+library(csaw)
+library(BiocParallel)
+library(rtracklayer)
+library(edgeR)
+library(patchwork)
+library(extraChIPs)
+library(plyranges)
+library(scales)
+library(ggside)
+library(cqn)
+```
+
+
+## Data
+
+All data for this vignette is expected to be in a sub-directory of the working 
+directory named "data", and all paths will be predicated on this.
+Please ensure you have all data in this location, obtained from 
+[here](https://github.com/smped/extraChIPs_vignette).
+
+The data itself is ChIP-Seq data targeting the histone mark H3K27ac, and is 
+taken from the cell-line MDA-MB-453 under Vehicle and DHT-stimulated conditions.
+Using CRCh37 as the reference genome, a subset of regions found on chromosome 10
+are included in this dataset for simplicity.
+
+`Seqinfo` objects are the foundation of working with GRanges, so let's define a
+suitable object for consistency throughout th analysis.
+
+```{r set-seqinfo}
+hg19 <- GenomeInfoDb::getChromInfoFromUCSC("hg19")
+sq <- hg19 %>% 
+  dplyr::filter(chrom %in% paste0("chr", c(1:22, "X", "Y"))) %>% 
+  mutate(genome = "hg19") %>% 
+  dplyr::select(
+    seqnames = chrom, seqlengths = size, isCircular = circular, genome
+  ) %>% 
+  as("Seqinfo")
+```
+
+# Working With Peaks
+
+The provided dataset includes six files produced by `macs2 callpeak` 
+[@Zhang2008-ms] in the `narrowPeak` format, and these are able to be easily 
+parsed using `extraChIPs`.
+
+```{r load-peaks}
+peakFiles <- list.files("data", pattern = "narrowPeak", full.names = TRUE)
+peaks <- importPeaks(peakFiles, seqinfo = sq)
+```
+
+This will import the peaks from all files as a single `GRangesList` object, 
+adding the file-name to each element by default.
+We can easily modify these names if we so wish.
+
+```{r change-names}
+names(peaks) <- str_remove_all(names(peaks), "_peaks.narrowPeak")
+```
+
+Once loaded, we can easily check how similar our replicates are.
+
+```{r plot-overlaps, fig.height=6, fig.cap = "*UpSet plot showing overlapping peaks across all replicates*"}
+plotOverlaps(peaks, min_size = 10, .sort_sets = FALSE)
+```
+
+Optionally, specifying a column and a suitable function will produce an 
+additional panel summarising that value.
+In the following, we'll show the maximum score obtained, highlighting that for 
+peaks identified in only one or two replicates, the overall signal intensity is
+generally lower.
+
+```{r plot-overlaps-score, fig.cap = "*UpSet plot showing overlapping peaks across all replicates, with the maximum score across all replicates shown in the upper panel.*"}
+plotOverlaps(peaks, min_size = 10, .sort_sets = FALSE, var = "score", f = "max")
+```
+
+A common task at this point may be to define consensus peaks within each 
+treatment group, by retaining only the peaks found in 2 of the 3 replicates.
+The default approach is to take the union of all ranges, with the returned 
+object containing logical values for each sample, as well as the number of 
+samples where an overlapping peak was found.
+
+If we wish to retain any of the original columns, such as the `macs2 callpeak` 
+score, we can simply pass the column names to `makeConsensus()`
+
+```{r consensus-with-score}
+consensus_veh <- peaks %>% 
+  .[str_detect(names(.), "Veh")] %>% 
+  makeConsensus(p = 2/3, var = "score")
+consensus_dht <- peaks %>% 
+  .[str_detect(names(.), "DHT")] %>% 
+  makeConsensus(p = 2 / 3, var = "score")
+```
+
+Alternatively, we could find the centre of the peaks as part of this process, 
+by averaging across the estimated peak centres for each sample.
+Whilst this is very common for *transcription factor* peaks, this may be less 
+informative for other types of ChIP targets, such as the histone marks we have.
+
+```{r consensus-with-centre}
+consensus_veh <- peaks %>% 
+  .[str_detect(names(.), "Veh")] %>% 
+  endoapply(mutate, centre = start + peak) %>% 
+  makeConsensus(p = 2/3, var = "centre") %>% 
+  mutate(centre = vapply(centre, mean, numeric(1)))
+consensus_dht <- peaks %>% 
+  .[str_detect(names(.), "DHT")] %>% 
+  endoapply(mutate, centre = start + peak) %>% 
+  makeConsensus(p = 2/3, var = "centre") %>% 
+  mutate(centre = vapply(centre, mean, numeric(1)))
+```
+
+We can also inspect these using `plotOverlaps()` provided we use a `GRangesList`
+for the input.
+
+```{r venn-consensus-overlap, fig.width=8, fig.cap = "*Overlap between consensus peaks identified in a treatment-specific manner*"}
+GRangesList(
+  Veh = granges(consensus_veh), DHT = granges(consensus_dht)
+) %>% 
+  plotOverlaps(set_col = c("grey70", "red"))
+```
+
+We could go one step further and define the set of peaks found in either 
+treatment.
+Given we're being inclusive here, we can leave p = 0 so any peak found in 
+either treatment is included.
+
+```{r all_consensus}
+union_peaks <- GRangesList(
+  Veh = select(consensus_veh, centre), DHT = select(consensus_dht, centre)
+) %>% 
+  makeConsensus(var = "centre") %>% 
+  mutate(centre = vapply(centre, mean, numeric(1)))
+```
+
+H3K27ac peaks tend to be far more variable in width than those from transcription factors, and as such we'll choose fixed-windows which are wider than the DiffBind default of 500bp, extending to 800bp.
+This is just above the 30th percentile of widths in the provided set of peaks and may somewhat appropriate.
+
+```{r}
+greylist <- import.bed("data/chr10_greylist_subset.bed", seqinfo = sq)
+blacklist <- import.bed("data/chr10_blacklist_subset.bed", seqinfo = sq)
+w <- 800
+centred_peaks <- union_peaks %>% 
+  as_tibble(rangeAsChar = FALSE) %>% 
+  mutate(start = centre - w / 2, end = centre + w / 2) %>% 
+  dplyr::select(seqnames, start, end) %>% 
+  makeGRangesFromDataFrame(seqinfo = sq) %>% 
+  filter_by_non_overlaps(c(greylist, blacklist))
+```
+
+
+```{r bfl}
+bfl <- list.files("data", pattern = "bam$", full.names = TRUE) %>% 
+  str_subset("Input", negate = TRUE) %>% 
+  BamFileList()
+names(bfl) <- str_remove_all(names(bfl), ".bam")
+se <- regionCounts(bfl, centred_peaks, ext = 200)
+se <- se[rowSums(assay(se, "counts")) > 0]
+colData(se)$treat <- str_extract(colnames(se), "(DHT|Veh)") %>% 
+  factor(levels = c("Veh", "DHT"))
+colData(se)$label <-  str_extract(colnames(se), "(DHT|Veh)_[0-9]")
+```
+
+```{r}
+plotAssayDensities(se, colour = "treat", trans = "log2")
+plotAssayRle(se, trans = "log2", fill = "treat")
+plotAssayPCA(se, trans = "log2", colour = "treat", label = "label")
+```
+
+```{r}
+library(BSgenome.Hsapiens.UCSC.hg19)
+gen <- BSgenome.Hsapiens.UCSC.hg19
+gc <- getSeq(gen, rowRanges(se)) %>% 
+  letterFrequency(letters = "GC", as.prob = TRUE)
+rowData(se)$gc <- as.numeric(gc)
+```
+
+```{r}
+cqn <- cqn(
+  assay(se, "counts"), x = rowData(se)$gc, sizeFactors = colData(se)$totals, 
+  lengths = rep(w + 1, nrow(se)), lengthMethod = "fixed"
+)
+cqnplot(cqn, col = as.integer(colData(se)$treat))
+X <- model.matrix(~treat, data = colData(se))
+cqn_res <- fitAssayDiff(se, design = X, offset = cqn$glm.offset, asRanges = TRUE)
+```
+
+```{r}
+arrange(cqn_res, PValue)
+sum(cqn_res$FDR < 0.05)
+```
+
+```{r}
+tmm_res <- fitAssayDiff(se, design = X, norm = "TMM", asRanges = TRUE)
+sum(tmm_res$FDR < 0.05)
+```
+
