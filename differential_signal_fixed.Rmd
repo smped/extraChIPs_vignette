@@ -76,6 +76,8 @@ library(plyranges)
 library(scales)
 library(ggside)
 library(cqn)
+library(quantro)
+theme_set(theme_bw())
 ```
 
 
@@ -224,14 +226,27 @@ se <- regionCounts(bfl, centred_peaks, ext = 200)
 se <- se[rowSums(assay(se, "counts")) > 0]
 colData(se)$treat <- str_extract(colnames(se), "(DHT|Veh)") %>% 
   factor(levels = c("Veh", "DHT"))
-colData(se)$label <-  str_extract(colnames(se), "(DHT|Veh)_[0-9]")
+colData(se)$sample <-  str_extract(colnames(se), "(DHT|Veh)_[0-9]")
+assay(se, "logCPM") <- cpm(assay(se, "counts"), lib.size = se$totals, log = TRUE)
 ```
 
 ```{r}
-plotAssayDensities(se, colour = "treat", trans = "log2")
-plotAssayRle(se, trans = "log2", fill = "treat")
-plotAssayPCA(se, trans = "log2", colour = "treat", label = "label")
+plotAssayDensities(se, assay = "logCPM", colour = "treat")
+plotAssayRle(se, assay = "logCPM", fill = "treat")
+plotAssayPCA(se, assay = "logCPM", colour = "treat", label = "sample")
 ```
+
+
+
+```{r}
+X <- model.matrix(~treat, data = colData(se))
+ls_res <- fitAssayDiff(se, design = X, asRanges = TRUE)
+sum(ls_res$FDR < 0.05)
+```
+
+
+
+
 
 ```{r}
 library(BSgenome.Hsapiens.UCSC.hg19)
@@ -246,18 +261,40 @@ cqn <- cqn(
   assay(se, "counts"), x = rowData(se)$gc, sizeFactors = colData(se)$totals, 
   lengths = rep(w + 1, nrow(se)), lengthMethod = "fixed"
 )
+as_tibble(cqn$func1) %>% 
+  mutate(GC = cqn$grid1) %>% 
+  pivot_longer(cols = all_of(colnames(se)), names_to = "sample", values_to =  "fit") %>% 
+  left_join(
+    as_tibble(colData(se))
+  ) %>% 
+  ggplot(aes(GC, fit, colour = treat, group = sample)) +
+  geom_line() +
+  labs(x = "GC content", y = "QR Fit", colour = "Treatment")
 cqnplot(cqn, col = as.integer(colData(se)$treat))
-X <- model.matrix(~treat, data = colData(se))
+assay(se, "CQN") <- cqn$y + cqn$offset
+plotAssayPCA(se, assay = "CQN", colour = "treat", label = "sample")
 cqn_res <- fitAssayDiff(se, design = X, offset = cqn$glm.offset, asRanges = TRUE)
+cqn_lt_res <- fitAssayDiff(se, assay = "CQN", design = X, method = "lt", asRanges = TRUE)
 ```
 
 ```{r}
 arrange(cqn_res, PValue)
 sum(cqn_res$FDR < 0.05)
+sum(cqn_lt_res$FDR < 0.05)
+cqn_res %>% 
+  as_tibble() %>% 
+  ggplot(aes(logCPM, logFC)) +
+  geom_point() +
+  geom_smooth(se = FALSE)
 ```
 
 ```{r}
 tmm_res <- fitAssayDiff(se, design = X, norm = "TMM", asRanges = TRUE)
 sum(tmm_res$FDR < 0.05)
 ```
+
+```{r}
+
+```
+
 
