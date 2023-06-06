@@ -77,6 +77,7 @@ library(scales)
 library(ggside)
 library(cqn)
 library(quantro)
+library(glue)
 theme_set(theme_bw())
 ```
 
@@ -107,6 +108,15 @@ sq <- hg19 %>%
   as("Seqinfo")
 ```
 
+```{r}
+samples <- read_tsv(here::here("data/ER/samples.tsv")) %>% 
+  mutate(treatment = factor(treatment, levels = c("E2", "E2DHT")))
+accessions <- samples %>% 
+  split(.$treatment) %>% 
+  lapply(pull, "accession")
+```
+
+
 # Working With Peaks
 
 The provided dataset includes six files produced by `macs2 callpeak` 
@@ -114,8 +124,8 @@ The provided dataset includes six files produced by `macs2 callpeak`
 parsed using `extraChIPs`.
 
 ```{r load-peaks}
-peakFiles <- list.files("data", pattern = "narrowPeak", full.names = TRUE)
-peaks <- importPeaks(peakFiles, seqinfo = sq)
+peaks <- here::here("data", "ER", glue("{samples$accession}_peaks.narrowPeak")) %>% 
+  importPeaks(seqinfo = sq)
 ```
 
 This will import the peaks from all files as a single `GRangesList` object, 
@@ -152,11 +162,11 @@ If we wish to retain any of the original columns, such as the `macs2 callpeak`
 score, we can simply pass the column names to `makeConsensus()`
 
 ```{r consensus-with-score}
-consensus_veh <- peaks %>% 
-  .[str_detect(names(.), "Veh")] %>% 
+consensus_e2 <- peaks %>% 
+  .[accessions$E2] %>% 
   makeConsensus(p = 2/3, var = "score")
-consensus_dht <- peaks %>% 
-  .[str_detect(names(.), "DHT")] %>% 
+consensus_e2dht <- peaks %>% 
+  .[accessions$E2DHT] %>% 
   makeConsensus(p = 2 / 3, var = "score")
 ```
 
@@ -166,13 +176,13 @@ Whilst this is very common for *transcription factor* peaks, this may be less
 informative for other types of ChIP targets, such as the histone marks we have.
 
 ```{r consensus-with-centre}
-consensus_veh <- peaks %>% 
-  .[str_detect(names(.), "Veh")] %>% 
+consensus_e2 <- peaks %>% 
+  .[accessions$E2] %>% 
   endoapply(mutate, centre = start + peak) %>% 
   makeConsensus(p = 2/3, var = "centre") %>% 
   mutate(centre = vapply(centre, mean, numeric(1)))
-consensus_dht <- peaks %>% 
-  .[str_detect(names(.), "DHT")] %>% 
+consensus_e2dht <- peaks %>% 
+  .[accessions$E2DHT] %>% 
   endoapply(mutate, centre = start + peak) %>% 
   makeConsensus(p = 2/3, var = "centre") %>% 
   mutate(centre = vapply(centre, mean, numeric(1)))
@@ -183,7 +193,7 @@ for the input.
 
 ```{r venn-consensus-overlap, fig.width=8, fig.cap = "*Overlap between consensus peaks identified in a treatment-specific manner*"}
 GRangesList(
-  Veh = granges(consensus_veh), DHT = granges(consensus_dht)
+  E2 = granges(consensus_e2), E2DHT = granges(consensus_e2dht)
 ) %>% 
   plotOverlaps(set_col = c("grey70", "red"))
 ```
@@ -195,7 +205,7 @@ either treatment is included.
 
 ```{r all_consensus}
 union_peaks <- GRangesList(
-  Veh = select(consensus_veh, centre), DHT = select(consensus_dht, centre)
+  E2 = select(consensus_e2, centre), E2DHT = select(consensus_e2dht, centre)
 ) %>% 
   makeConsensus(var = "centre") %>% 
   mutate(centre = vapply(centre, mean, numeric(1)))
@@ -205,9 +215,9 @@ H3K27ac peaks tend to be far more variable in width than those from transcriptio
 This is just above the 30th percentile of widths in the provided set of peaks and may somewhat appropriate.
 
 ```{r}
-greylist <- import.bed("data/chr10_greylist_subset.bed", seqinfo = sq)
-blacklist <- import.bed("data/chr10_blacklist_subset.bed", seqinfo = sq)
-w <- 800
+greylist <- import.bed("data/ER/chr10_greylist.bed", seqinfo = sq)
+blacklist <- import.bed("data/ER/chr10_blacklist.bed", seqinfo = sq)
+w <- 500
 centred_peaks <- union_peaks %>% 
   as_tibble(rangeAsChar = FALSE) %>% 
   mutate(start = centre - w / 2, end = centre + w / 2) %>% 
@@ -218,15 +228,18 @@ centred_peaks <- union_peaks %>%
 
 
 ```{r bfl}
-bfl <- list.files("data", pattern = "bam$", full.names = TRUE) %>% 
-  str_subset("Input", negate = TRUE) %>% 
+bfl <- here::here("data/ER", glue("{samples$accession}.bam")) %>% 
   BamFileList()
 names(bfl) <- str_remove_all(names(bfl), ".bam")
 se <- regionCounts(bfl, centred_peaks, ext = 200)
 se <- se[rowSums(assay(se, "counts")) > 0]
-colData(se)$treat <- str_extract(colnames(se), "(DHT|Veh)") %>% 
-  factor(levels = c("Veh", "DHT"))
-colData(se)$sample <-  str_extract(colnames(se), "(DHT|Veh)_[0-9]")
+colData(se) <- colData(se) %>% 
+  as_tibble(rownames = "accession") %>% 
+  left_join(samples) %>% 
+  mutate(sample = accession) %>% 
+  as.data.frame() %>% 
+  column_to_rownames("accession") %>% 
+  DataFrame()
 assay(se, "logCPM") <- cpm(assay(se, "counts"), lib.size = se$totals, log = TRUE)
 ```
 
@@ -239,7 +252,7 @@ plotAssayPCA(se, assay = "logCPM", colour = "treat", label = "sample")
 
 
 ```{r}
-X <- model.matrix(~treat, data = colData(se))
+X <- model.matrix(~treatment, data = colData(se))
 ls_res <- fitAssayDiff(se, design = X, asRanges = TRUE)
 sum(ls_res$FDR < 0.05)
 ```
@@ -247,16 +260,13 @@ sum(ls_res$FDR < 0.05)
 
 
 
-
 ```{r}
+## Move this entire chunk to the H3K27ac sliding windows
 library(BSgenome.Hsapiens.UCSC.hg19)
 gen <- BSgenome.Hsapiens.UCSC.hg19
 gc <- getSeq(gen, rowRanges(se)) %>% 
   letterFrequency(letters = "GC", as.prob = TRUE)
 rowData(se)$gc <- as.numeric(gc)
-```
-
-```{r}
 cqn <- cqn(
   assay(se, "counts"), x = rowData(se)$gc, sizeFactors = colData(se)$totals, 
   lengths = rep(w + 1, nrow(se)), lengthMethod = "fixed"
@@ -267,17 +277,13 @@ as_tibble(cqn$func1) %>%
   left_join(
     as_tibble(colData(se))
   ) %>% 
-  ggplot(aes(GC, fit, colour = treat, group = sample)) +
+  ggplot(aes(GC, fit, colour = treatment, group = sample)) +
   geom_line() +
   labs(x = "GC content", y = "QR Fit", colour = "Treatment")
-cqnplot(cqn, col = as.integer(colData(se)$treat))
 assay(se, "CQN") <- cqn$y + cqn$offset
-plotAssayPCA(se, assay = "CQN", colour = "treat", label = "sample")
+plotAssayPCA(se, assay = "CQN", colour = "treatment", label = "sample")
 cqn_res <- fitAssayDiff(se, design = X, offset = cqn$glm.offset, asRanges = TRUE)
 cqn_lt_res <- fitAssayDiff(se, assay = "CQN", design = X, method = "lt", asRanges = TRUE)
-```
-
-```{r}
 arrange(cqn_res, PValue)
 sum(cqn_res$FDR < 0.05)
 sum(cqn_lt_res$FDR < 0.05)
@@ -293,8 +299,5 @@ tmm_res <- fitAssayDiff(se, design = X, norm = "TMM", asRanges = TRUE)
 sum(tmm_res$FDR < 0.05)
 ```
 
-```{r}
-
-```
 
 
