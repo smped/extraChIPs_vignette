@@ -78,6 +78,7 @@ library(ggside)
 library(cqn)
 library(quantro)
 library(glue)
+library(ggrepel)
 theme_set(theme_bw())
 ```
 
@@ -204,26 +205,29 @@ Given we're being inclusive here, we can leave p = 0 so any peak found in
 either treatment is included.
 
 ```{r all_consensus}
+greylist <- import.bed("data/ER/chr10_greylist.bed", seqinfo = sq)
+blacklist <- import.bed("data/ER/chr10_blacklist.bed", seqinfo = sq)
 union_peaks <- GRangesList(
   E2 = select(consensus_e2, centre), E2DHT = select(consensus_e2dht, centre)
 ) %>% 
   makeConsensus(var = "centre") %>% 
-  mutate(centre = vapply(centre, mean, numeric(1)))
+  mutate(centre = vapply(centre, mean, numeric(1))) %>% 
+  filter_by_non_overlaps(c(greylist, blacklist)) 
 ```
 
 H3K27ac peaks tend to be far more variable in width than those from transcription factors, and as such we'll choose fixed-windows which are wider than the DiffBind default of 500bp, extending to 800bp.
 This is just above the 30th percentile of widths in the provided set of peaks and may somewhat appropriate.
 
 ```{r}
-greylist <- import.bed("data/ER/chr10_greylist.bed", seqinfo = sq)
-blacklist <- import.bed("data/ER/chr10_blacklist.bed", seqinfo = sq)
 w <- 500
 centred_peaks <- union_peaks %>% 
-  as_tibble(rangeAsChar = FALSE) %>% 
-  mutate(start = centre - w / 2, end = centre + w / 2) %>% 
-  dplyr::select(seqnames, start, end) %>% 
-  makeGRangesFromDataFrame(seqinfo = sq) %>% 
-  filter_by_non_overlaps(c(greylist, blacklist))
+  mutate(
+    centred = GRanges(
+      glue("{seqnames}:{centre - w/2}-{centre + w/2}"), seqinfo = sq
+    ),
+    union_peak = granges(union_peaks)
+  ) %>%
+  colToRanges("centred")
 ```
 
 
@@ -258,9 +262,38 @@ sum(ls_res$FDR < 0.05)
 ```
 
 
+```{r}
+tmm_res <- fitAssayDiff(se, design = X, norm = "TMM", asRanges = TRUE, fc = 1.2)
+sum(tmm_res$FDR < 0.05)
+```
 
 
 ```{r}
+tmm_res %>% 
+  as_tibble() %>% 
+  mutate(`FDR < 0.05` = FDR < 0.05) %>% 
+  ggplot(aes(logCPM, logFC)) +
+  geom_point(aes(colour = `FDR < 0.05`)) +
+  geom_smooth(se = FALSE) +
+  geom_label_repel(
+    aes(label = union_range), colour = "red",
+    data = . %>% dplyr::filter(FDR < 0.05)
+  ) +
+  scale_colour_manual(values = c("black", "red"))
+```
+
+```{r}
+gr <- tmm_res %>% 
+  arrange(-logFC) %>% 
+  as_tibble() %>% 
+  dplyr::slice(1) %>% 
+  pull("union_range")
+```
+
+
+
+
+```{r cqn, eval = FALSE, echo = FALSE}
 ## Move this entire chunk to the H3K27ac sliding windows
 library(BSgenome.Hsapiens.UCSC.hg19)
 gen <- BSgenome.Hsapiens.UCSC.hg19
@@ -287,16 +320,7 @@ cqn_lt_res <- fitAssayDiff(se, assay = "CQN", design = X, method = "lt", asRange
 arrange(cqn_res, PValue)
 sum(cqn_res$FDR < 0.05)
 sum(cqn_lt_res$FDR < 0.05)
-cqn_res %>% 
-  as_tibble() %>% 
-  ggplot(aes(logCPM, logFC)) +
-  geom_point() +
-  geom_smooth(se = FALSE)
-```
 
-```{r}
-tmm_res <- fitAssayDiff(se, design = X, norm = "TMM", asRanges = TRUE)
-sum(tmm_res$FDR < 0.05)
 ```
 
 
