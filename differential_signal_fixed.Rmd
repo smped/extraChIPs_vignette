@@ -283,11 +283,43 @@ tmm_res %>%
 ```
 
 ```{r}
+trans <- read_rds(here::here("data/chr10_trans_subset.rds"))
+genome(trans) <- genome(sq)
+regions <- read_rds(here::here("data/chr10_region_subset.rds"))
+regions <- lapply(
+  regions, 
+  function(x){
+    genome(x) <- genome(sq)
+    x
+  }
+)
+regions_gr <- regions %>% 
+  lapply(select, region) %>% 
+  GRangesList() %>% 
+  unlist() %>% 
+  sort() %>% 
+  setNames(NULL)
+region_levels <- vapply(regions, function(x) x$region[1], character(1))
+region_grl <- splitAsList(regions_gr, regions_gr$region)[region_levels]
+reg_col <- hcl.colors(length(region_levels), "Viridis", rev = TRUE)
+names(reg_col) <- region_levels
 gr <- tmm_res %>% 
   arrange(-logFC) %>% 
   as_tibble() %>% 
   dplyr::slice(1) %>% 
-  pull("union_range")
+  pull("union_range") %>% 
+  GRanges(seqinfo = sq) %>% 
+  keepStandardChromosomes()
+bwfl <- here::here("data/ER", glue("{names(accessions)}_cov_chr10.bw")) %>% 
+  BigWigFileList() %>% 
+  setNames(names(accessions))
+data("grch37.cytobands")
+plotHFGC(
+  gr, genes = trans, 
+  features = region_grl, featcol = reg_col,
+  coverage = list(ER = bwfl), cytobands = grch37.cytobands,
+  zoom = 15, shift = 5e3
+)
 ```
 
 
