@@ -70,39 +70,35 @@ lapply(
 
 ## H3K27ac Samples
 
-Peak files were loaded in R using extraChIPs and re-written after subsetting
+Peak files were loaded in R using extraChIPs and re-written after subsetting.
+For the set of H3K27ac peaks, choose those detected in both conditions with a
+qValue < 0.01 in either.
+
+
 
 ```r
 library(rtracklayer)
 library(extraChIPs)
 library(tidyverse)
+library(glue)
+library(plyranges)
 df <- read.table(file.path("~/DRMCRL/PRJNA509779/output/annotations/chrom.sizes"))
 names(df) <- c("seqnames", "seqlengths")
 df$genome <- "GRCh37"
 df$isCircular <- FALSE
 sq <- as(df, "Seqinfo")
-peakFiles <- list.files("data/H3K27ac", pattern = "narrowPeak", full.names = TRUE)
-peaks <- importPeaks(peakFiles, seqinfo = sq)
-subset_peaks <- endoapply(peaks, subsetByOverlaps, GRanges("chr10:42354900-100000000"))
-names(subset_peaks) %>% 
-  lapply(
-    function(x) {
-      df <- subset_peaks[[x]] %>% 
-        as.data.frame %>% 
-        rownames_to_column("name") %>% 
-        dplyr::select(
-          seqnames, start, end, name, score, strand, ends_with("Value"), peak
-        ) %>%
-        mutate(start = start - 1, strand = ".")
-      fl <- here::here("data/H3K27ac", x)
-      write.table(
-        df, fl, quote = FALSE, sep = "\t", col.names = FALSE, row.names = FALSE
-      )
-    }
-  )
+peaks <- here::here(
+  "~/DRMCRL/PRJNA509779/output/macs2/H3K27ac",
+  glue("{c('E2','E2DHT')}_merged_peaks.narrowPeak")
+) %>% 
+  importPeaks() %>% 
+  makeConsensus(var = "qValue", p = 1) %>% 
+  subset(seqnames == "chr10") %>% 
+  subset(vapply(qValue, max, numeric(1)) > 2)
+export.bed(peaks, here::here("data/H3K27ac", "H3K27ac_chr10.bed"))
 ```
 
-Coverage BigWig files were also processed in a similar manner
+Coverage BigWig files were also processed in a similar manner to ER
 
 ```r
 fl <- list.files("data/H3K27ac", pattern = "pileup.bw", full.names = TRUE)

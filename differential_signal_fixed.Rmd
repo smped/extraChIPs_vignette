@@ -205,8 +205,8 @@ Given we're being inclusive here, we can leave p = 0 so any peak found in
 either treatment is included.
 
 ```{r all_consensus}
-greylist <- import.bed("data/ER/chr10_greylist.bed", seqinfo = sq)
-blacklist <- import.bed("data/ER/chr10_blacklist.bed", seqinfo = sq)
+greylist <- import.bed("data/chr10_greylist.bed", seqinfo = sq)
+blacklist <- import.bed("data/chr10_blacklist.bed", seqinfo = sq)
 union_peaks <- GRangesList(
   E2 = select(consensus_e2, centre), E2DHT = select(consensus_e2dht, centre)
 ) %>% 
@@ -305,9 +305,11 @@ reg_col <- hcl.colors(length(region_levels), "Viridis", rev = TRUE)
 names(reg_col) <- region_levels
 gr <- tmm_res %>% 
   arrange(-logFC) %>% 
+  .[1] %>% 
+  granges()
   as_tibble() %>% 
   dplyr::slice(1) %>% 
-  pull("union_range") %>% 
+  pull("union_peak") %>% 
   GRanges(seqinfo = sq) %>% 
   keepStandardChromosomes()
 bwfl <- here::here("data/ER", glue("{names(accessions)}_cov_chr10.bw")) %>% 
@@ -318,7 +320,7 @@ plotHFGC(
   gr, genes = trans, 
   features = region_grl, featcol = reg_col,
   coverage = list(ER = bwfl), cytobands = grch37.cytobands,
-  zoom = 15, shift = 5e3
+  zoom = 25, shift = 5e3
 )
 ```
 

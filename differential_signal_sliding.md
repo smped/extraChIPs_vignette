@@ -6,39 +6,46 @@ true
 
 The [GRAVI](https://github.com/smped/GRAVI) workflow, for which this
 package is designed, uses sliding windows for differential signal
-analysis in a manner similar to the package `csaw`, but also
-incorporating `macs2` peaks. The workflow itself extends to integrating
-multiple ChIP targets and external data sources, and as such, this
-package introduces a handful of functions to simplify and enable these
-analyses. Whilst many existing approaches refer to this type of analysis
-as Differential Binding analysis, we prefer the term *Differential
-Signal Analysis* as this more accurately captures the range of ChIP
-targets which are likely to be investigated.
+analysis using strategies defined in the package `csaw` (Lun and Smyth
+2016). The GRAVI workflow itself extends to integrating multiple ChIP
+targets and external data sources, and as such, this package introduces
+a handful of functions to simplify and enable these analyses. Whilst
+many existing approaches refer to this type of analysis as Differential
+Binding analysis, we prefer the term *Differential Signal Analysis* as
+this more accurately captures the range of ChIP targets which are likely
+to be investigated, such as H3K27ac or similar.
 
 The majority of examples below use heavily reduced datasets to provide
 general guidance on using the functions. Some results may appear trivial
 as a result, but will hopefully prove far more useful in a true
 experimental context. All data, along with this vignette are available
-[here](https://github.com/smped/extraChIPs_vignette). Please place all
-contents of the data directory in a directory named data in your own
-working directory.
+[here](https://github.com/smped/extraChIPs_vignette). In order to
+replicate this vignette, please place all contents of the `data`
+directory provided in this additional repository into a directory named
+data in your own working directory.
+
+It may also be worth noting that this vignette should run on a
+conventional laptop with no particularly large performance requirements.
+However, when following this workflow across an entire genome, memory
+requirements may exceed those of a standard laptop, and an HPC or
+high-performance workstation may be required.
 
 # Setup
 
 ## Installation
 
 In order to use the package `extraChIPs` and follow this vignette, we
-recommend using the package `BiocManager` hosted on CRAN. Once this is
-installed, the additional packages required for this vignette
-(`tidyverse`, `Rsamtools`, `csaw`, `BiocParallel` and `rtracklayer`) can
-also be installed.
+recommend using the package `BiocManager` (hosted on CRAN) to install
+all packages. Once `BiocManager` is installed, the additional packages
+required for this vignette can also be installed as shown below.
 
 ``` r
 if (!"BiocManager" %in% rownames(installed.packages()))
   install.packages("BiocManager")
 pkg <- c(
   "tidyverse", "Rsamtools", "csaw", "BiocParallel", "rtracklayer", "edgeR", 
-  "patchwork", "extraChIPs", "plyranges", "scales", "ggside"
+  "patchwork", "extraChIPs", "plyranges", "scales", "glue", "here", "quantro",
+  "cqn", "ggrepel", "BSgenome.Hsapiens.UCSC.hg19"
 )
 BiocManager::install(pkg, update = FALSE)
 ```
@@ -56,138 +63,46 @@ library(patchwork)
 library(extraChIPs)
 library(plyranges)
 library(scales)
-library(ggside)
+library(glue)
+library(here)
+library(magrittr)
+library(quantro)
+library(cqn)
+library(ggrepel)
+library(BSgenome.Hsapiens.UCSC.hg19)
+theme_set(theme_bw())
 ```
 
 ## Data
 
 All data for this vignette is expected to be in a sub-directory of the
-working directory named “data”, and all paths will be predicated on
-this. Please ensure you have all data in this location, obtained from
+working directory named “data” (including “data/H3K27ac”), and all paths
+will be predicated on this. Please ensure you have all data in this
+location, obtained from
 [here](https://github.com/smped/extraChIPs_vignette).
 
 The data itself is ChIP-Seq data targeting the histone mark H3K27ac, and
-is taken from the cell-line MDA-MB-453 under Vehicle and DHT-stimulated
-conditions. Using CRCh37 as the reference genome, a subset of regions
-found on chromosome 10 are included in this dataset for simplicity.
+is taken from the ZR-75-1 cell-line using data from the BioProject ,
+Preprocessing was performed using the
+[`prepareChIPs`](https://github.com/smped/prepareChIPs) workflow,
+written in snakemake (Mölder et al. 2021) and all code is available at
+<https://github.com/smped/PRJNA509779>. H3K27ac signal was obtained
+under basseline (E2) and DHT-treated (E2DHT) conditions, with alignments
+being to GRCh37. For this workflow, data has been subset to a region
+found on chromosome 10 for simplicity.
 
-`Seqinfo` objects are the foundation of working with GRanges, so let’s
-define a suitable object for consistency throughout th analysis.
-
-``` r
-hg19 <- GenomeInfoDb::getChromInfoFromUCSC("hg19")
-grch37 <- hg19 %>% 
-  dplyr::filter(chrom %in% paste0("chr", c(1:22, "X", "Y"))) %>% 
-  mutate(genome = "GRCh37") %>% 
-  dplyr::select(
-    seqnames = chrom, seqlengths = size, isCircular = circular, genome
-  ) %>% 
-  as("Seqinfo")
-```
-
-# Working With Peaks
-
-The provided dataset includes six files produced by `macs2 callpeak`
-(Zhang et al. 2008) in the `narrowPeak` format, and these are able to be
-easily parsed using `extraChIPs`.
+A description of the samples can be found in the file
+`data/PRJNA509779.tsv`. A pooled Input (IgG) sample was used for the
+entire dataset and this accession is provided in a separate column.
 
 ``` r
-peakFiles <- list.files("data", pattern = "narrowPeak", full.names = TRUE)
-peaks <- importPeaks(peakFiles, seqinfo = grch37)
-```
-
-This will import the peaks from all files as a single `GRangesList`
-object, adding the file-name to each element by default. We can easily
-modify these names if we so wish.
-
-``` r
-names(peaks) <- str_remove_all(names(peaks), "_peaks.narrowPeak")
-```
-
-Once loaded, we can easily check how similar our replicates are.
-
-``` r
-plotOverlaps(peaks, min_size = 10, .sort_sets = FALSE)
-```
-
-![*UpSet plot showing overlapping peaks across all
-replicates*](differential_signal_sliding_files/figure-gfm/plot-overlaps-1.png)
-
-Optionally, specifying a column and a suitable function will produce an
-additional panel summarising that value. In the following, we’ll show
-the maximum score obtained, highlighting that for peaks identified in
-only one or two replicates, the overall signal intensity is generally
-lower.
-
-``` r
-plotOverlaps(peaks, min_size = 10, .sort_sets = FALSE, var = "score", f = "max")
-```
-
-![*UpSet plot showing overlapping peaks across all replicates, with the
-maximum score across all replicates shown in the upper
-panel.*](differential_signal_sliding_files/figure-gfm/plot-overlaps-score-1.png)
-
-A common task at this point may be to define consensus peaks within each
-treatment group, by retaining only the peaks found in 2 of the 3
-replicates. The default approach is to take the union of all ranges,
-with the returned object containing logical values for each sample, as
-well as the number of samples where an overlapping peak was found.
-
-If we wish to retain any of the original columns, such as the
-`macs2 callpeak` score, we can simply pass the column names to
-`makeConsensus()`
-
-``` r
-consensus_veh <- peaks %>% 
-  .[str_detect(names(.), "Veh")] %>% 
-  makeConsensus(p = 2/3, var = "score")
-consensus_dht <- peaks %>% 
-  .[str_detect(names(.), "DHT")] %>% 
-  makeConsensus(p = 2 / 3, var = "score")
-```
-
-Alternatively, we could find the centre of the peaks as part of this
-process, by averaging across the estimated peak centres for each sample.
-Whilst this is very common for *transcription factor* peaks, this may be
-less informative for other types of ChIP targets, such as the histone
-marks we have.
-
-``` r
-consensus_veh <- peaks %>% 
-  .[str_detect(names(.), "Veh")] %>% 
-  endoapply(mutate, centre = start + peak) %>% 
-  makeConsensus(p = 2/3, var = "centre") %>% 
-  mutate(centre = vapply(centre, mean, numeric(1)))
-consensus_dht <- peaks %>% 
-  .[str_detect(names(.), "DHT")] %>% 
-  endoapply(mutate, centre = start + peak) %>% 
-  makeConsensus(p = 2/3, var = "centre") %>% 
-  mutate(centre = vapply(centre, mean, numeric(1)))
-```
-
-We can also inspect these using `plotOverlaps()` provided we use a
-`GRangesList` for the input.
-
-``` r
-GRangesList(
-  Veh = granges(consensus_veh), DHT = granges(consensus_dht)
-) %>% 
-  plotOverlaps(set_col = c("grey70", "red"))
-```
-
-![*Overlap between consensus peaks identified in a treatment-specific
-manner*](differential_signal_sliding_files/figure-gfm/venn-consensus-overlap-1.png)
-
-We could go one step further and define the set of peaks found in either
-treatment. Given we’re being inclusive here, we can leave p = 0 so any
-peak found in either treatment is included.
-
-``` r
-all_consensus <- GRangesList(
-  Veh = select(consensus_veh, centre), DHT = select(consensus_dht, centre)
-) %>% 
-  makeConsensus(var = "centre") %>% 
-  mutate(centre = vapply(centre, mean, numeric(1)))
+samples <- here("data", "PRJNA509779.tsv") %>% 
+  read_tsv() %>% 
+  dplyr::filter(target == "H3K27ac") %>% 
+  mutate(treatment = factor(treatment, levels = c("E2", "E2DHT")))
+accessions <- unique(c(samples$accession, samples$input))
+treat_colours <- c("steelblue", "red3", "grey")
+names(treat_colours) <- c(levels(samples$treatment), "Input")
 ```
 
 # Differential Signal Analysis
@@ -198,11 +113,12 @@ The standard approach of tools such as DiffBind (Ross-Innes et al. 2012)
 is to take a set of peaks, re-centre them, then set all regions to be
 the same width. From there, data is passed to `edgeR` (Chen, Lun, and
 Smyth 2016) or `DESeq2` (Love, Huber, and Anders 2014) for analysis.
-Whilst this approach can be replicated using the defined peaks above,
-the suggested approach for `extraChIPs` is to us sliding windows, as per
-`csaw`. The resultant *variable width regions* can be particularly
-advantageous for ChIP targets such as H3K27ac where regions marked by
-histone-acetylation can vary greatly in size.
+This approach using `extraChIPs` is demonstrated in a separate vignette,
+however, this workflow instead focusses on a sliding window approach as
+per the package `csaw` (Lun and Smyth 2016). The resultant *variable
+width regions* can be particularly advantageous for ChIP targets such as
+H3K27ac where regions marked by histone-acetylation can vary greatly in
+size.
 
 The starting point for differential signal analyses using `extraChIPs`
 is to define a set of sliding windows across the genome, then count
@@ -214,37 +130,57 @@ chromosome 10 across two experimental conditions and one input sample,
 and we will define them all as a `BamFileList`.
 
 ``` r
-bfl <- list.files("data", pattern = "bam$", full.names = TRUE) %>% 
-  BamFileList()
-names(bfl) <- str_remove_all(names(bfl), ".bam")
+bfl <- here("data", "H3K27ac", glue("{accessions}.bam")) %>% 
+  BamFileList() %>% 
+  setNames(str_remove_all(names(.), ".bam"))
+file.exists(path(bfl))
+```
+
+    ## [1] TRUE TRUE TRUE TRUE TRUE TRUE TRUE
+
+``` r
+sq <- seqinfo(bfl)
+isCircular(sq) <- rep(FALSE, length(seqlevels(sq)))
+genome(sq) <- "GRCh37"
 ```
 
 **NB:** It should also be noted that counting all reads across a
 `BamFileList` using sliding windows, **will require a significant amount
 of RAM** and will be beyond the capacity of most laptops as of the time
-of writing. When working with complete datasets, this step is best
-performed on an HPC or a similar interactive server.
+of writing. When working with complete datasets, this particular step is
+best performed on an HPC or a similar interactive server with a large
+amount of memory.
 
 The approach taken below is to first define a set of sliding windows
 across the genome, using the capabilities of `csaw`. After counting
-reads across all windows, a set of pre-defined regions is then used
-guide the function `dualFilter()` which will discard low-signal windows,
-retaining only those a) above a minimum signal level and b) with signal
-notably above that of any input samples. These regions can be obtained
-from any external resource, or can even be taken from `macs2`-defined
-peaks from the same samples.
+reads across all windows, a set of *pre-defined regions* where H3K27ac
+signal is confidently found, is then used guide the function
+`dualFilter()`. This function will discard low-signal windows, retaining
+only those a) above a minimum signal level and b) with signal notably
+above that of any input samples. These regions can be obtained from any
+external resource, or can even be taken from `macs2`-defined peaks from
+the same samples. Here, the set of regions was defined as those found
+when merging samples from each treatment, in both treatments, with an
+FDR \< 0.01. Importantly, our analysis will not be restricted to these
+regions, but these will instead guide `dualFilter()` as to the best
+regions to retain for analysis.
 
 First we can define our windows and count the alignments using the
-existing capabilities and functions provided in the `csaw` package (Lun
-and Smyth 2016). In the following, we’ll use a sliding window of 120bp
-and a step size of 40bp, meaning each nucleotide is covered by 3
-windows. In addition, we’ll exclude blacklisted and greylisted regions
-as provided in the dataset. These can be obtained easily by using the
-`GreyListChIP` package, which is beyond the scope of this vignette.
+existing capabilities and functions provided in the `csaw` package. In
+the following, we’ll use a sliding window of 120bp and a step size of
+40bp, meaning each nucleotide is covered by 3 windows. In addition,
+we’ll exclude blacklisted and greylisted regions as provided in the
+dataset. These can be obtained easily by using the `GreyListChIP`
+package, which is beyond the scope of this vignette, however, code for
+preparing the GreyList\` is available
+[here](https://github.com/smped/PRJNA509779/blob/main/workflow/scripts/make_greylist.R).
+Fragment sizes for each sample were also estimated to be around 200nt.
 
 ``` r
-greylist <- import.bed("data/chr10_greylist_subset.bed", seqinfo = grch37)
-blacklist <- import.bed("data/chr10_blacklist_subset.bed", seqinfo = grch37)
+greylist <- here("data", "chr10_greylist.bed") %>% 
+  import.bed(seqinfo = sq)
+blacklist <- here("data", "chr10_blacklist.bed") %>% 
+  import.bed(seqinfo = sq)
 rp <- readParam(
   pe = "none",
   dedup = TRUE,
@@ -259,9 +195,11 @@ wincounts <- windowCounts(
   filter = length(bfl),
   param = rp
 )
+seqlevels(wincounts) <- seqlevels(sq)
+seqinfo(wincounts) <- sq
 ```
 
-This produces a `RangesSummarizedExperiment` with windows included which
+This produces a `RangedSummarizedExperiment` with windows included which
 passed the minimum threshold of 7 total reads. We can check which
 windows passed this threshold using `rowRanges()`
 
@@ -269,43 +207,56 @@ windows passed this threshold using `rowRanges()`
 rowRanges(wincounts)
 ```
 
-    ## GRanges object with 262151 ranges and 0 metadata columns:
+    ## GRanges object with 506538 ranges and 0 metadata columns:
     ##            seqnames            ranges strand
     ##               <Rle>         <IRanges>  <Rle>
-    ##        [1]    chr10 42820161-42820280      *
-    ##        [2]    chr10 42820201-42820320      *
-    ##        [3]    chr10 42820241-42820360      *
-    ##        [4]    chr10 42820281-42820400      *
-    ##        [5]    chr10 42821001-42821120      *
+    ##        [1]    chr10 42491801-42491920      *
+    ##        [2]    chr10 42491921-42492040      *
+    ##        [3]    chr10 42494601-42494720      *
+    ##        [4]    chr10 42495641-42495760      *
+    ##        [5]    chr10 42495681-42495800      *
     ##        ...      ...               ...    ...
-    ##   [262147]    chr10 99998721-99998840      *
-    ##   [262148]    chr10 99998761-99998880      *
-    ##   [262149]    chr10 99998801-99998920      *
-    ##   [262150]    chr10 99998841-99998960      *
-    ##   [262151]    chr10 99998881-99999000      *
+    ##   [506534]    chr10 99999641-99999760      *
+    ##   [506535]    chr10 99999681-99999800      *
+    ##   [506536]    chr10 99999721-99999840      *
+    ##   [506537]    chr10 99999761-99999880      *
+    ##   [506538]    chr10 99999801-99999920      *
     ##   -------
-    ##   seqinfo: 1 sequence from an unspecified genome
+    ##   seqinfo: 84 sequences from GRCh37 genome
 
 We can also add some key information to the `colData` element of this
 object, which will also be propagated to all downstream objects.
 
 ``` r
-wincounts$sample <- names(bfl)
-wincounts$treat <- str_extract(names(bfl), "(Veh|DHT)") %>% 
-  fct(levels = c("Veh", "DHT"))
 colData(wincounts)
 ```
 
-    ## DataFrame with 7 rows and 6 columns
-    ##            bam.files    totals       ext      rlen      sample    treat
-    ##          <character> <integer> <integer> <integer> <character> <factor>
-    ## DHT_1 data/DHT_1.bam    252973       200        74       DHT_1      DHT
-    ## DHT_2 data/DHT_2.bam    295028       200        74       DHT_2      DHT
-    ## DHT_3 data/DHT_3.bam    295105       200        74       DHT_3      DHT
-    ## Input data/Input.bam     82276       200        72       Input      NA 
-    ## Veh_1 data/Veh_1.bam    250970       200        74       Veh_1      Veh
-    ## Veh_2 data/Veh_2.bam    280898       200        74       Veh_2      Veh
-    ## Veh_3 data/Veh_3.bam    294356       200        74       Veh_3      Veh
+    ## DataFrame with 7 rows and 4 columns
+    ##                         bam.files    totals       ext      rlen
+    ##                       <character> <integer> <integer> <integer>
+    ## SRR8315186 /home/steviep/github..    267342       200        75
+    ## SRR8315187 /home/steviep/github..    307383       200        75
+    ## SRR8315188 /home/steviep/github..    288965       200        75
+    ## SRR8315189 /home/steviep/github..    296764       200        75
+    ## SRR8315190 /home/steviep/github..    325211       200        75
+    ## SRR8315191 /home/steviep/github..    283745       200        75
+    ## SRR8315192 /home/steviep/github..    361835       200        75
+
+``` r
+colData(wincounts) <- colData(wincounts) %>%
+  as_tibble(rownames = "accession") %>% 
+  left_join(samples, by = "accession") %>% 
+  dplyr::select(
+    accession, all_of(colnames(colData(wincounts))), target, treatment
+  ) %>% 
+  mutate(
+    target = str_replace_na(target, "Input"),
+    treatment = str_replace_na(treatment, "Input") %>% 
+      as.factor()
+  ) %>% 
+  DataFrame() %>% 
+  set_rownames(.$accession)
+```
 
 A density plot can be simply drawn of these counts, with the vast
 majority of windows receiving very low counts, due to the nature of
@@ -315,19 +266,25 @@ targeting a transcription factor (TF), as seen in the two treatment
 group samples.
 
 ``` r
-plotAssayDensities(wincounts, colour = "treat", trans = "log1p") +
-  theme_bw()
+plotAssayDensities(wincounts, colour = "treatment", trans = "log1p") +
+  theme_bw() +
+  scale_colour_manual(values = treat_colours)
 ```
 
-![*Read Densities for all returned windows across all
-samples*](differential_signal_sliding_files/figure-gfm/plot-densities-1.png)
+<figure>
+<img
+src="differential_signal_sliding_files/figure-gfm/plot-densities-1.png"
+alt="Read Densities for all returned windows across all samples" />
+<figcaption aria-hidden="true"><em>Read Densities for all returned
+windows across all samples</em></figcaption>
+</figure>
 
 ## Filtering of Sliding Windows
 
 After counting all reads in the sliding genomic windows, the next step
 is to discard windows for which counts are unlikely to represent true
 signal from our ChIP target. The strategy employed in `extraChIPs` uses
-a set of consensus peaks to automatically set thresholds based on 1)
+a set of pre-defined regions to automatically set thresholds based on 1)
 counts strongly above the counts from the input sample, and 2) the
 windows with the overall highest signal. Thresholds are determined such
 that a proportion (e.g. `q = 0.5`) of the windows which overlap one of
@@ -336,7 +293,9 @@ will return more windows, however many of these will tend to only
 marginally overlap a peak in one of the tail regions, and these will
 most likely be covered by neighbouring windows. Experience has shown
 that values such as `q = 0.5` tend to return a considerable proportion
-of windows containing true signal from the ChIP target.
+of windows containing true signal from the ChIP target. Higher values
+will tend to return more sliding windows where the edges overlap the
+tails of the guide regions.
 
 The we can pass these to the function `dualFilter()` which utilises the
 strategy described above. On large datasets, this can be quite
@@ -345,16 +304,18 @@ filtering strategies are also provided by the package `csaw` and these
 can be accessed using `?csaw::filterWindows`
 
 ``` r
+guide_regions <- here("data", "H3K27ac", "H3K27ac_chr10.bed") %>% 
+  import.bed(seqinfo = sq)
 filtcounts <- dualFilter(
-  x = wincounts[, !is.na(wincounts$treat)],
-  bg = wincounts[, is.na(wincounts$treat)], 
-  ref = all_consensus,
+  x = wincounts[, wincounts$target == "H3K27ac"],
+  bg = wincounts[, wincounts$target == "Input"], 
+  ref = guide_regions,
   q = 0.6
 )
 ```
 
-Thus we have reduced our initial set of 262,151 sliding windows to the
-16,141 windows most likely to contain true signal from our ChIP target.
+Thus we have reduced our initial set of 506,538 sliding windows to the
+23,417 windows most likely to contain true signal from our ChIP target.
 The returned object will by default contain `counts` and `logCPM`
 assays, with the complete library sizes used for the calculation of
 `logCPM` values. Similarly, *the input sample is no longer included* in
@@ -365,13 +326,13 @@ returned object using any number of strategies.
 dim(wincounts)
 ```
 
-    ## [1] 262151      7
+    ## [1] 506538      7
 
 ``` r
 dim(filtcounts)
 ```
 
-    ## [1] 16141     6
+    ## [1] 23417     6
 
 ``` r
 assays(filtcounts)
@@ -384,14 +345,18 @@ We can once again check our signal distributions, this time on the
 logCPM values.
 
 ``` r
-plotAssayDensities(filtcounts, assay = "logCPM", colour = "treat") +
-  scale_colour_brewer(palette = "Set1") +
+plotAssayDensities(filtcounts, assay = "logCPM", colour = "treatment") +
+  scale_colour_manual(values = treat_colours) +
   theme_bw()
 ```
 
-![*Densities for logCPM values across all samples after discarding
-windows less likely to contain H3K27ac
-signal*](differential_signal_sliding_files/figure-gfm/plotcpm-1.png)
+<figure>
+<img src="differential_signal_sliding_files/figure-gfm/plotcpm-1.png"
+alt="Densities for logCPM values across all samples after discarding windows less likely to contain H3K27ac signal" />
+<figcaption aria-hidden="true"><em>Densities for logCPM values across
+all samples after discarding windows less likely to contain H3K27ac
+signal</em></figcaption>
+</figure>
 
 The `rowData` element of the returned object will contain a logical
 column indicating where each specific retained window overlapped one of
@@ -401,28 +366,28 @@ the supplied consensus peaks.
 rowRanges(filtcounts)
 ```
 
-    ## GRanges object with 16141 ranges and 1 metadata column:
+    ## GRanges object with 23417 ranges and 1 metadata column:
     ##           seqnames            ranges strand | overlaps_ref
     ##              <Rle>         <IRanges>  <Rle> |    <logical>
-    ##       [1]    chr10 43047561-43047680      * |         TRUE
-    ##       [2]    chr10 43047601-43047720      * |         TRUE
-    ##       [3]    chr10 43047641-43047760      * |         TRUE
-    ##       [4]    chr10 43047681-43047800      * |         TRUE
-    ##       [5]    chr10 43047721-43047840      * |         TRUE
+    ##       [1]    chr10 42862921-42863040      * |         TRUE
+    ##       [2]    chr10 42862961-42863080      * |         TRUE
+    ##       [3]    chr10 42863001-42863120      * |         TRUE
+    ##       [4]    chr10 42863041-42863160      * |         TRUE
+    ##       [5]    chr10 42863081-42863200      * |         TRUE
     ##       ...      ...               ...    ... .          ...
-    ##   [16137]    chr10 99894961-99895080      * |         TRUE
-    ##   [16138]    chr10 99895001-99895120      * |         TRUE
-    ##   [16139]    chr10 99895041-99895160      * |         TRUE
-    ##   [16140]    chr10 99895081-99895200      * |         TRUE
-    ##   [16141]    chr10 99895121-99895240      * |         TRUE
+    ##   [23413]    chr10 99895121-99895240      * |         TRUE
+    ##   [23414]    chr10 99895161-99895280      * |         TRUE
+    ##   [23415]    chr10 99895201-99895320      * |         TRUE
+    ##   [23416]    chr10 99895241-99895360      * |         TRUE
+    ##   [23417]    chr10 99895281-99895400      * |         TRUE
     ##   -------
-    ##   seqinfo: 1 sequence from an unspecified genome
+    ##   seqinfo: 84 sequences from GRCh37 genome
 
 ``` r
 mean(rowRanges(filtcounts)$overlaps_ref)
 ```
 
-    ## [1] 0.9997522
+    ## [1] 1
 
 ## Initial Visualisation
 
@@ -439,36 +404,44 @@ groups.
 ``` r
 a <- plotAssayRle(filtcounts, assay = "logCPM", fill = "treat") +
   geom_hline(yintercept = 0, linetype = 2, colour = "grey") +
-  scale_fill_brewer(palette = "Set1") +
+  scale_fill_manual(values = treat_colours) +
   ggtitle("RLE: Across All Samples") +
   theme_bw()
 b <- plotAssayRle(
   filtcounts, assay = "logCPM", fill = "treat", rle_group = "treat"
 ) +
   geom_hline(yintercept = 0, linetype = 2, colour = "grey") +
-  scale_fill_brewer(palette = "Set1") +
+  scale_fill_manual(values = treat_colours) +
   ggtitle("RLE: Within Treatment Groups") +
   theme_bw()
 a + b + plot_layout(guides = "collect") + 
   plot_annotation(tag_levels = "A")
 ```
 
-![*RLE plots across all samples (A) and with values calculated within
-treatment groups
-(B).*](differential_signal_sliding_files/figure-gfm/plot-assay-rle-1.png)
+<figure>
+<img
+src="differential_signal_sliding_files/figure-gfm/plot-assay-rle-1.png"
+alt="RLE plots across all samples (A) and with values calculated within treatment groups (B)." />
+<figcaption aria-hidden="true"><em>RLE plots across all samples (A) and
+with values calculated within treatment groups (B).</em></figcaption>
+</figure>
 
 We can also check the samples using a PCA plot, again colouring the
 points by treatment group and adding labels, which will repel by default
 if the points are shown.
 
 ``` r
-plotAssayPCA(filtcounts, "logCPM", colour = "treat", label = "sample") +
-  scale_colour_brewer(palette = "Set1") +
+plotAssayPCA(filtcounts, "logCPM", colour = "treatment", label = "accession") +
+  scale_colour_manual(values = treat_colours) +
   theme_bw()
 ```
 
-![*PCA plot based on the logCPM
-assay*](differential_signal_sliding_files/figure-gfm/plot-pca-1.png)
+<figure>
+<img src="differential_signal_sliding_files/figure-gfm/plot-pca-1.png"
+alt="PCA plot based on the logCPM assay" />
+<figcaption aria-hidden="true"><em>PCA plot based on the logCPM
+assay</em></figcaption>
+</figure>
 
 ## Statistical Testing
 
@@ -488,40 +461,42 @@ method (method = “lt”) is specifically for logCPM values and these can
 be provided as output by `dualFilter()` or may be normalised using any
 number of additional methods. In addition to the above methods, a
 range-based $H_0$ (McCarthy and Smyth 2009) can be specified by
-providing a value to the `fc` or `lfc` arguments.
+providing a value to the `fc` or `lfc` arguments, which removes any need
+for *post-hoc* filtering and correctly controls the FDR, unlike
+*post-hoc* filtering based on a fold-change threshold.
 
-Here, we’ll fit our data using Quasi-Likelihood Fits, library-size
-normalisation and setting a change in signal beyond the range of $\pm$
-20% as being of interest. By default, the returned object, will contain
-the results from model fitting in the `rowData()` element as these are
-result associated with each row element in the `SummarizedExperiment`
-object. If the object is a `RangedSummarizedExperiment` object, setting
+Here, we’ll initially fit our data using Quasi-Likelihood Fits,
+library-size normalisation and setting a change in signal beyond the
+range of $\pm$ 20% as being of interest. By default, the returned
+object, would be a `SummarizedExperiment` object containing the results
+from model fitting in the `rowData()` element. However, setting
 `asRanges = TRUE` will simply return the set of GRanges along with the
-testing results.
+testing results as a stand-alone object.
 
 ``` r
-X <- model.matrix(~treat, data = colData(filtcounts))
+X <- model.matrix(~treatment, data = colData(filtcounts))
 fit_gr <- fitAssayDiff(filtcounts, design = X, fc = 1.2, asRanges = TRUE)
 ```
 
 ## Merging Windows
 
-After an analysis has been performed, common values contained in the
-output may be estimated signal (`logCPM`), estimated change (`logFC`)
-with both raw and adjusted p-values. Given the dependency of
-neighbouring windows, any adjusted p-values will not be appropriate and
-a merging of overlapping and/or neighbouring windows should be
-performed. Multiple `csaw` methods are wrapped using `mergeByCol()`,
-`mergeBySig()` with minor changes to the returned object, such as the
-inclusion of the representative range in the column `keyval_range`.
+After an analysis has been performed, values contained in the output
+will be estimated signal (`logCPM`), estimated change (`logFC`) with
+both raw and adjusted p-values. Given the dependency of neighbouring
+windows, any adjusted p-values will not be appropriate and a merging of
+overlapping and/or neighbouring windows should be performed. Multiple
+`csaw` methods are wrapped using `mergeByCol()`, `mergeBySig()` with
+minor changes to the returned object, such as the inclusion of the
+representative range in the column `keyval_range`.
 
 For this vignette, we’ll merge using the asymptotically exact harmonic
 mean p-value, which can also be used for merging dependent p-values
-(Wilson 2019). When merging windows using the harmonic mean p-values,
-instead of values from a representative window, weighted averages for
-the expression and logFC estimates are returned using the weights
-$w_i = \frac{1}{p_i}$. A representative window, corresponding to the
-original window with the lowest p-value is returned.
+(Wilson 2019). This approach tests H<sub>0</sub>: no $p$-value in the
+set of p-values is significant. When merging windows using the harmonic
+mean p-values, instead of values from a representative window, weighted
+averages for the expression and logFC estimates are returned using the
+weights $w_i = \frac{1}{p_i}$. A representative window, corresponding to
+the original window with the lowest p-value is returned.
 
 ``` r
 results_gr <- mergeByHMP(fit_gr, inc_cols = "overlaps_ref", merge_within = 120)
@@ -536,52 +511,386 @@ arrange(results_gr, hmp)[1:5]
     ## GRanges object with 5 ranges and 10 metadata columns:
     ##       seqnames            ranges strand | n_windows      n_up    n_down
     ##          <Rle>         <IRanges>  <Rle> | <integer> <integer> <integer>
-    ##   [1]    chr10 79266481-79268400      * |        38         3         0
-    ##   [2]    chr10 43689161-43690240      * |        25         4         0
-    ##   [3]    chr10 58717481-58717840      * |         7         3         0
-    ##   [4]    chr10 67671561-67671800      * |         4         3         0
-    ##   [5]    chr10 67670801-67671160      * |         7         1         0
+    ##   [1]    chr10 79257441-79258720      * |        30         3         0
+    ##   [2]    chr10 43689241-43690160      * |        21         2         0
+    ##   [3]    chr10 74008161-74008760      * |        13         2         0
+    ##   [4]    chr10 63858841-63859040      * |         3         1         0
+    ##   [5]    chr10 63859401-63859760      * |         7         1         0
     ##       overlaps_ref            keyval_range    logCPM     logFC         hmp
     ##          <logical>               <GRanges> <numeric> <numeric>   <numeric>
-    ##   [1]         TRUE chr10:79266721-79266840   7.60592   2.33531 1.35064e-13
-    ##   [2]         TRUE chr10:43689401-43689520   7.43019   2.28678 4.79764e-13
-    ##   [3]         TRUE chr10:58717521-58717640   6.75830   2.52756 4.78855e-11
-    ##   [4]         TRUE chr10:67671601-67671720   6.64579   2.54747 1.10884e-10
-    ##   [5]         TRUE chr10:67670801-67670920   6.56879   2.62167 3.73516e-10
+    ##   [1]         TRUE chr10:79257761-79257880   7.02801   1.83161 1.84310e-12
+    ##   [2]         TRUE chr10:43689681-43689800   6.50461   1.78769 8.00605e-09
+    ##   [3]         TRUE chr10:74008441-74008560   6.49284   1.81722 9.04613e-09
+    ##   [4]         TRUE chr10:63858881-63859000   5.99283   1.75275 5.91544e-07
+    ##   [5]         TRUE chr10:63859601-63859720   5.99405   1.82278 9.46455e-07
     ##           hmp_fdr      status
     ##         <numeric> <character>
-    ##   [1] 7.50956e-11   Increased
-    ##   [2] 1.33375e-10   Increased
-    ##   [3] 8.87478e-09   Increased
-    ##   [4] 1.54129e-08   Increased
-    ##   [5] 4.15350e-08   Increased
+    ##   [1] 1.32519e-09   Increased
+    ##   [2] 2.16805e-06   Increased
+    ##   [3] 2.16805e-06   Increased
+    ##   [4] 1.06330e-04   Increased
+    ##   [5] 1.36100e-04   Increased
     ##   -------
-    ##   seqinfo: 1 sequence from an unspecified genome
+    ##   seqinfo: 84 sequences from GRCh37 genome
 
-In the above, we returned 50 ranges which we might consider using the
-significance threshold $\alpha$ = 0.05. A particularly beneficial
-feature of this approach is that the final ranges will be of highly
-variable width, with this select region of chromosome 10 producing
-merged windows ranging from 120 to 17360bp, as may be expected for
-H3K27ac signal.
-
-We can also quickly check out results using a heatmap across the
-retained windows which correspond to our results for differential
-signal, although this will not provide any specific genomic context.
+In the above, we returned 19 ranges which we might consider using the
+significance threshold $\alpha$ = 0.05. As is common, we can assess our
+results using an MA plot. However, given that testing is performed using
+sliding windows and merging windows using the harmonic mean will
+introduce a bias, we can check using the complete set of sliding windows
+and the final set of merged windows. Any bias present in our data will
+be visible when using the sliding windows, whilst our final results can
+be inspected using the merged windows.
 
 ``` r
-filtcounts %>%
-  subsetByOverlaps(subset(results_gr, hmp == min(hmp))) %>%
-  plotAssayHeatmap(assay = "logCPM", ysideline = TRUE, yside_col = "treat") +
-  scale_fill_viridis_c() +
-  scale_colour_brewer(palette = "Set1") +
-  scale_ysidex_continuous(expand = expansion(0.1), minor_breaks = NULL) +
+A <- fit_gr %>% 
+  as_tibble() %>% 
+  ggplot(aes(logCPM, logFC)) +
+  geom_point(alpha = 0.6) +
+  geom_smooth(se = FALSE, method = "loess") +
+  geom_label(
+    aes(label = label),
+    data = . %>% 
+      summarise(
+        n = dplyr::n(),
+        logCPM = max(logCPM) - 0.1 * diff(range(logCPM)),
+        logFC = max(logFC) - 0.05 * diff(range(logFC)),
+        label = glue("{comma(n)}\nSliding Windows")
+      )
+  ) +
+  ylim(range(fit_gr$logFC)) +
+  ggtitle("MA Plot: All Retained Sliding Windows")
+B <- results_gr %>% 
+  as_tibble() %>% 
+  mutate(`FDR < 0.05` = hmp_fdr < 0.05) %>% 
+  ggplot(aes(logCPM, logFC)) +
+  geom_point(aes(colour = `FDR < 0.05`), alpha = 0.6) +
+  geom_smooth(se = FALSE, method = "loess") +
+  geom_label_repel(
+    aes(label = range, colour = `FDR < 0.05`),
+    data = . %>% dplyr::filter(hmp_fdr == min(hmp_fdr)),
+    show.legend = FALSE
+  ) +
+  geom_label(
+    aes(label = label),
+    data = . %>% 
+      summarise(
+        n = dplyr::n(),
+        logCPM = max(logCPM) - 0.1 * diff(range(logCPM)),
+        logFC = max(fit_gr$logFC) - 0.05 * diff(range(fit_gr$logFC)),
+        label = glue("{comma(n)}\nMerged Windows")
+      )
+  ) +
+  scale_colour_manual(values = c("black", "red")) +
+  ylim(range(fit_gr$logFC)) +
+  ggtitle("MA Plot: Merged Windows")
+A + B + plot_annotation(tag_levels = "A")
+```
+
+<figure>
+<img
+src="differential_signal_sliding_files/figure-gfm/plot-ma-libsize-1.png"
+alt="MA Plots using A) all sliding windows (after filtering) and B) the final set of merged windows. The most highly ranked merged window is also labelled in the set of merged windows. Blue lines represent a loess curve through the data." />
+<figcaption aria-hidden="true">MA Plots using A) all sliding windows
+(after filtering) and B) the final set of merged windows. The most
+highly ranked merged window is also labelled in the set of merged
+windows. Blue lines represent a loess curve through the
+data.</figcaption>
+</figure>
+
+A particularly beneficial feature of this approach is that the final
+ranges will be of highly variable width, with this select region of
+chromosome 10 producing merged windows ranging from 120bp to 18.88kb, as
+may be expected for H3K27ac signal.
+
+``` r
+results_gr %>%
+  mutate(kb = width/1e3) %>% 
+  as_tibble() %>% 
+  mutate(`FDR < 0.05` = hmp_fdr < 0.05) %>% 
+  ggplot(aes(kb, logCPM, colour = `FDR < 0.05`)) +
+  geom_point() +
+  scale_x_log10() +
+  scale_colour_manual(values = c("black", "red")) +
+  labs(x = "Merged Window Size (kb)")
+```
+
+<figure>
+<img
+src="differential_signal_sliding_files/figure-gfm/plot-width-logcpm-1.png"
+alt="Larger windows tend to be associated with stronger signal. Merged windows which only include 4-5 sliding windows tend to be associated with low H3K27ac signal. Here one window showing changed binding is larger than 10kb and we have been able to detect change somewhere within this range." />
+<figcaption aria-hidden="true">Larger windows tend to be associated with
+stronger signal. Merged windows which only include 4-5 sliding windows
+tend to be associated with low H3K27ac signal. Here one window showing
+changed binding is larger than 10kb and we have been able to detect
+change somewhere within this range.</figcaption>
+</figure>
+
+## Alternative Normalisation Approaches
+
+Using Library Size normalisation, as above, is a conservative approach
+and other methods such as RLE (Love, Huber, and Anders 2014) or TMM
+(Robinson and Oshlack 2010) may be appropriate. However, these methods
+assume that signal distributions are drawn from the same distributions
+across all samples, which unlike most RNA-Seq, is not always able to be
+safely assumed. An example may be when an transcription factor is
+primarily cytoplasmic in one treatment group, before being translocated
+to the nucleus in another treatment. The Androgen Receptor (*AR*) is a
+common example of this behaviour.
+
+Whilst H3K27ac signal should remain approximately constant between these
+two treatments, we can easily check for differences in data
+distributions as well as any GC-bias. The package `quantro` (Hicks and
+Irizarry 2015) provides a useful test for any difference in medians as
+well as differences in the underlying distributions.
+
+``` r
+set.seed(100)
+qtest <- assay(filtcounts, "counts") %>% 
+  quantro(groupFactor = filtcounts$treatment, B = 1e3)
+qtest
+```
+
+    ## quantro: Test for global differences in distributions
+    ##    nGroups:  2 
+    ##    nTotSamples:  6 
+    ##    nSamplesinGroups:  3 3 
+    ##    anovaPval:  0.49809 
+    ##    quantroStat:  0.19728 
+    ##    quantroPvalPerm:  0.68
+
+Here, no differences were evident across median values (ANOVA p = 0.498)
+or between distributions (p = 0.68) and as such, TMM/RLE normalisation
+may be appropriate.
+
+### TMM Normalisation
+
+To perform an analysis using TMM-normalisation, we can simply provide
+this to `fitAssayDiff()`
+
+``` r
+tmm_gr <- fitAssayDiff(
+  filtcounts, design = X, fc = 1.2, norm = "TMM", asRanges = TRUE
+)
+tmm_results <- mergeByHMP(tmm_gr, inc_cols = "overlaps_ref", merge_within = 120)
+```
+
+As might be expected, the results are highly concordant, with
+TMM-normalisation providing a moderate improvement in statistical power,
+returning 21 windows with evidence of differential signal, instead of
+the initial 19. Any of the methods taken by `edgeR::calacNormFactors()`
+can be used here.
+
+If a difference in distributions is found between groups, the
+normalisation step can be set to only occur within treatment groups, by
+passing the grouping column name to the `groups =` argument. However,
+this may exaggerate differences between groups and may introduce false
+positives.
+
+Checking MA-plots shows that the very slight negative bias in
+higher-signal windows when using library size normalisation (seen above)
+was lessened after TMM normalisation.
+
+``` r
+tmm_gr %>% 
+  as_tibble() %>% 
+  ggplot(aes(logCPM, logFC)) +
+  geom_point(alpha = 0.6) +
+  geom_smooth(se = FALSE, method = "loess") +
+  ggtitle("MA Plot: TMM Normalisation")
+```
+
+<figure>
+<img
+src="differential_signal_sliding_files/figure-gfm/plot-ma-tmm-1.png"
+alt="MA plot using TMM normalisation. The blue line corresponds to a loess curve fitted through the points." />
+<figcaption aria-hidden="true">MA plot using TMM normalisation. The blue
+line corresponds to a loess curve fitted through the
+points.</figcaption>
+</figure>
+
+### GC Bias
+
+As GC-bias is a known issue in high-throughput sequencing, additional
+packages such as `cqn` can also be incorporated in an analytic workflow
+with `extraChIPs`. Firstly, we need to find the GC-content for each of
+the initial sliding windows. The UCSC-derived version of the genome
+contains this information, but first we’ll have to modify the seqinfo
+objects to ensure we’re able to obtain data from the correct location.
+
+``` r
+hg19 <- BSgenome.Hsapiens.UCSC.hg19
+sq_hg19 <- seqinfo(hg19) 
+ranges_hg19 <- rowRanges(filtcounts) %>% 
+  keepStandardChromosomes() %>% 
+  sortSeqlevels()
+seqlevels(ranges_hg19) <- seqlevels(sq_hg19)
+seqinfo(ranges_hg19) <- sq_hg19
+gc <- getSeq(hg19, ranges_hg19) %>% 
+  letterFrequency(letters = "GC", as.prob = TRUE)
+rowData(filtcounts)$gc <- gc[,1]
+```
+
+Now we’ve obtained this information, we can check for any bias in our
+data by plotting logFC estimates as a function of GC content for the
+complete set of sliding windows. For our data, minimal bias is evident,
+with a possible, but slight, downwards bias in the low-GC windows when
+using Library-Size normalisation only.
+
+``` r
+A <- fit_gr %>% 
+  mutate(gc = gc[,1]) %>% 
+  as_tibble() %>% 
+  ggplot(aes(gc, logFC)) +
+  geom_point() +
+  geom_smooth(se = FALSE) +
+  scale_x_continuous(name = "GC Content", labels = percent) +
+  ggtitle("GC-Bias: Library Size Normalisation")
+B <- tmm_gr %>% 
+  mutate(gc = gc[,1]) %>% 
+  as_tibble() %>% 
+  ggplot(aes(gc, logFC)) +
+  geom_point() +
+  geom_smooth(se = FALSE) +
+  scale_x_continuous(name = "GC Content", labels = percent) +
+  ggtitle("GC-Bias: TMM Normalisation")
+A + B + plot_annotation(tag_levels = "A")
+```
+
+<figure>
+<img src="differential_signal_sliding_files/figure-gfm/gc-bias-1.png"
+alt="GC-Content Vs estiamted logFC when using A) library-size normalisation and B) TMM normalisation" />
+<figcaption aria-hidden="true">GC-Content Vs estiamted logFC when using
+A) library-size normalisation and B) TMM normalisation</figcaption>
+</figure>
+
+If we’re concerned about bias in our data, we can use an approach like
+Conditional-Quantile normalisation (Hansen, Irizarry, and Wu 2012) to
+correct for this, using fixed-length windows whilst still incorporating
+any GC bias. We can also store the normalised logCPM values as a new
+assay.
+
+``` r
+cqn <- cqn(
+  counts = assay(filtcounts, "counts"), 
+  x = rowData(filtcounts)$gc, sizeFactors = filtcounts$totals,
+  lengths = width(filtcounts), lengthMethod = "fixed"
+)
+assay(filtcounts, "norm_logCPM") <- cqn$y + cqn$offset
+cqnplot(
+  cqn, 
+  col = treat_colours[as.character(filtcounts$treatment)], 
+  xlab = "GC Content"
+)
+```
+
+<figure>
+<img src="differential_signal_sliding_files/figure-gfm/cqn-1.png"
+alt="Systemic impacts of GC content across all samples. A clear bias is evident through the middle range of the data, with a degree of variability again seen in the high-GC and low-GC windows." />
+<figcaption aria-hidden="true">Systemic impacts of GC content across all
+samples. A clear bias is evident through the middle range of the data,
+with a degree of variability again seen in the high-GC and low-GC
+windows.</figcaption>
+</figure>
+
+We can check the impact of normalisation using PCA.
+
+``` r
+plotAssayPCA(
+  filtcounts, assay = "norm_logCPM", colour = "treatment", label = "accession"
+) +
+  scale_colour_manual(values = treat_colours) +
   theme_bw()
 ```
 
-![*Heatmap showing retained sliding windows whih correspond to the most
-highly-ranked region for differential
-signal.*](differential_signal_sliding_files/figure-gfm/plot-assay-heatmap-1.png)
+<figure>
+<img
+src="differential_signal_sliding_files/figure-gfm/plot-cqn-pca-1.png"
+alt="PCA plot of CQ-Normalised logCPM values" />
+<figcaption aria-hidden="true">PCA plot of CQ-Normalised logCPM
+values</figcaption>
+</figure>
+
+The function `cqn()` also returns a matrix of offsets able to supplied
+to a `DGEList`, and these can also be passed via `plotAssayDiff()`. As
+these offsets are use for normalisation, no other method is required.
+
+``` r
+cqn_gr <- fitAssayDiff(
+  filtcounts, design = X, fc = 1.2, offset = cqn$glm.offset, asRanges = TRUE
+)
+cqn_results <- mergeByHMP(cqn_gr, inc_cols = "overlaps_ref", merge_within = 120)
+```
+
+This approach has returned fewer results, with only 16 merged windows
+being considered significant, when accounting for GC-bias, however this
+is likely to reflect a more accurate results, particularly if setting
+`fc = 0` as a less stringent hypothesis test.
+
+Again we can check for bias using an MA plot, along with the GC-bias
+plot
+
+``` r
+A <- cqn_gr %>% 
+  as_tibble() %>% 
+  ggplot(aes(logCPM, logFC)) +
+  geom_point(alpha = 0.6) +
+  geom_smooth(se = FALSE) +
+  ylim(range(fit_gr$logFC)) +
+  ggtitle("MA Plot: All Sliding Windows (CQN)")
+B <- cqn_gr %>% 
+  as_tibble() %>% 
+  ggplot(aes(gc, logFC)) +
+  geom_point() +
+  geom_smooth(se = FALSE) +
+  scale_x_continuous(name = "GC Content", labels = percent) +
+  ggtitle("GC-Bias: CQ Normalisation")
+A + B + plot_annotation(tag_levels = "A")
+```
+
+<figure>
+<img
+src="differential_signal_sliding_files/figure-gfm/plot-bias-cqn-1.png"
+alt="QC plots for results using CQN, including an A) MA-plot and B) GC-bias plot. The minimal bias oberserved prevously for low-GC regions appears to have been rectified, however, higher GC regions appear less satisfactory." />
+<figcaption aria-hidden="true">QC plots for results using CQN, including
+an A) MA-plot and B) GC-bias plot. The minimal bias oberserved prevously
+for low-GC regions appears to have been rectified, however, higher GC
+regions appear less satisfactory.</figcaption>
+</figure>
+
+Results can be compared to any of the previous approaches, and it
+appears that using CQN has led to slightly more conservative estimates
+of fold-change.
+
+``` r
+tibble(TMM = tmm_gr$logFC, CQN = cqn_gr$logFC) %>% 
+  ggplot(aes(TMM, CQN)) +
+  geom_point(alpha = 0.6) +
+  geom_abline() +
+  geom_smooth(se = FALSE, method = "lm")
+```
+
+<figure>
+<img
+src="differential_signal_sliding_files/figure-gfm/compare-logfc-tmm-cqn-1.png"
+alt="Comparison of logFC estimates obtained using TMM and CQ normalisation. The black lin represents y = x, whilst the regression line is shown in blue. A slight downwards bias was evident in CQN derived estimates." />
+<figcaption aria-hidden="true">Comparison of logFC estimates obtained
+using TMM and CQ normalisation. The black lin represents y = x, whilst
+the regression line is shown in blue. A slight downwards bias was
+evident in CQN derived estimates.</figcaption>
+</figure>
+
+As a further alternative, we could fit the CQ-normalised logCPM values
+using `limma-trend`, by passing this assay and setting `method = "lt"`.
+However, Quasi-likelihood models are generally preferred.
+
+``` r
+cqn_lt_gr <- fitAssayDiff(
+  filtcounts, assay = "norm_logCPM", design = X, fc = 1.2, 
+  method = "lt", asRanges = TRUE
+)
+cqn_lt_results <- mergeByHMP(cqn_lt_gr, inc_cols = "overlaps_ref", merge_within = 120)
+```
 
 ## Mapping of Windows To Genes
 
@@ -632,38 +941,175 @@ chromosome 10, as has the set of genes within this region. These can be
 loaded as follows.
 
 ``` r
-regions <- read_rds("data/chr10_region_subset.rds")
-genes <- import.gff("data/chr10_gene_subset.gtf")
+gencode <- here("data/gencode.v43lift37.chr10.annotation.gtf.gz") %>% 
+  import.gff() %>% 
+  filter_by_overlaps(GRanges("chr10:42354900-100000000")) %>% 
+  split(.$type)
+seqlevels(gencode) <- seqlevels(sq)
+seqinfo(gencode) <- sq
+tss <- gencode$transcript %>% 
+  resize(width = 1, fix = "start") %>% 
+  select(gene_id, ends_with("name")) %>% 
+  reduceMC(min.gapwidth = 0)
+promoters <- gencode$transcript %>% 
+    select(gene_id, ends_with("name")) %>% 
+    promoters(upstream = 2500, downstream = 500) %>% 
+    reduceMC(simplify = FALSE)
 ```
-
-For our mapping steps, we’ll simply use the `promoters` element as these
-are the regions directly overlapping a TSS for all transcripts within
-this region of the genome.
 
 ``` r
-results_gr <- mapByFeature(results_gr, genes = genes, prom = regions$promoters)
+tmm_results <- tmm_results %>% 
+  mutate(
+    status = case_when(
+      hmp_fdr >= 0.05 ~ "Unchanged",
+      logFC > 0 ~ "Increased",
+      logFC < 0 ~ "Decreased"
+    ),
+    tss = overlapsAny(., tss)
+  ) %>% 
+  mapByFeature(
+    genes = gencode$gene,
+    prom = select(promoters, gene_id, gene_name)
+  )
+tmm_results %>% 
+  filter(hmp_fdr < 0.05) %>% 
+  arrange(hmp)
 ```
+
+    ## GRanges object with 21 ranges and 13 metadata columns:
+    ##        seqnames            ranges strand | n_windows      n_up    n_down
+    ##           <Rle>         <IRanges>  <Rle> | <integer> <integer> <integer>
+    ##    [1]    chr10 79257441-79258720      * |        30         3         0
+    ##    [2]    chr10 43689241-43690160      * |        21         2         0
+    ##    [3]    chr10 74008161-74008760      * |        13         2         0
+    ##    [4]    chr10 63858841-63859040      * |         3         1         0
+    ##    [5]    chr10 63859401-63859760      * |         7         1         0
+    ##    ...      ...               ...    ... .       ...       ...       ...
+    ##   [17]    chr10 79307081-79307960      * |        20         2         0
+    ##   [18]    chr10 74014401-74015360      * |        22         3         0
+    ##   [19]    chr10 90615361-90615640      * |         4         2         0
+    ##   [20]    chr10 63696921-63697240      * |         6         3         0
+    ##   [21]    chr10 74878001-74878360      * |         7         3         0
+    ##        overlaps_ref            keyval_range    logCPM     logFC         hmp
+    ##           <logical>               <GRanges> <numeric> <numeric>   <numeric>
+    ##    [1]         TRUE chr10:79257761-79257880   7.02793   1.85621 6.20766e-13
+    ##    [2]         TRUE chr10:43689681-43689800   6.51086   1.81157 4.45187e-09
+    ##    [3]         TRUE chr10:74008441-74008560   6.49275   1.84270 5.07996e-09
+    ##    [4]         TRUE chr10:63858881-63859000   5.99257   1.77724 4.03575e-07
+    ##    [5]         TRUE chr10:63859601-63859720   5.99366   1.84777 6.37775e-07
+    ##    ...          ...                     ...       ...       ...         ...
+    ##   [17]         TRUE chr10:79307441-79307560   6.45271   1.15247 0.000563495
+    ##   [18]         TRUE chr10:74015201-74015320   6.14440   1.26391 0.000592892
+    ##   [19]         TRUE chr10:90615361-90615480   5.97947   1.14308 0.000804490
+    ##   [20]         TRUE chr10:63697121-63697240   6.00058   1.11473 0.001074487
+    ##   [21]         TRUE chr10:74878201-74878320   6.19539   1.05769 0.001437350
+    ##            hmp_fdr      status       tss               gene_id       gene_name
+    ##          <numeric> <character> <logical>       <CharacterList> <CharacterList>
+    ##    [1] 4.46331e-10   Increased     FALSE ENSG00000156113.25_17          KCNMA1
+    ##    [2] 1.21750e-06   Increased     FALSE ENSG00000198915.12_14        RASGEF1A
+    ##    [3] 1.21750e-06   Increased     FALSE   ENSG00000166295.9_6         ANAPC16
+    ##    [4] 7.25426e-05   Increased     FALSE ENSG00000150347.17_12          ARID5B
+    ##    [5] 9.17121e-05   Increased     FALSE ENSG00000150347.17_12          ARID5B
+    ##    ...         ...         ...       ...                   ...             ...
+    ##   [17]   0.0236827   Increased     FALSE ENSG00000156113.25_17          KCNMA1
+    ##   [18]   0.0236827   Increased     FALSE   ENSG00000289506.2_2 ENSG00000289506
+    ##   [19]   0.0304436   Increased     FALSE   ENSG00000152766.6_8         ANKRD22
+    ##   [20]   0.0386278   Increased     FALSE ENSG00000150347.17_12          ARID5B
+    ##   [21]   0.0492121   Increased     FALSE  ENSG00000166321.14_7          NUDT13
+    ##   -------
+    ##   seqinfo: 84 sequences from GRCh37 genome
+
+``` r
+tmm_results %>% 
+  as_tibble() %>% 
+  ggplot(aes(logCPM, logFC, colour = status)) +
+  geom_point() +
+  geom_label_repel(
+    aes(label = label),
+    data = . %>% 
+      arrange(hmp) %>% 
+      dplyr::slice(1:12) %>% 
+      mutate(
+        label  = vapply(gene_name, paste, character(1), collapse = "; ") %>% 
+          str_trunc(30)
+      ),
+    fill = "white", alpha = 0.6, show.legend = FALSE
+  ) +
+  scale_colour_manual(
+    values = c(Unchanged = "grey30", Increased = "red3", Decreased = "royalblue")
+  ) 
+```
+
+<figure>
+<img
+src="differential_signal_sliding_files/figure-gfm/plot-ma-mapped-1.png"
+alt="MA-plot with the top 12 regions by significane labelled according to the most likely gene" />
+<figcaption aria-hidden="true">MA-plot with the top 12 regions by
+significane labelled according to the most likely gene</figcaption>
+</figure>
+
+``` r
+tmm_results %>% 
+  distanceToNearest(tss) %>% 
+  as_tibble() %>% 
+  arrange(distance) %>% 
+  mutate(p = seq_along(distance) / nrow(.)) %>% 
+  dplyr::filter(distance < 1e5) %>% 
+  ggplot(aes(distance / 1e3, p)) +
+  geom_line() +
+  geom_label_repel(
+    aes(label = percent(p)), 
+    data = . %>% 
+      dplyr::filter(distance == 0) %>% 
+      dplyr::filter(p == max(p))
+  ) +
+  scale_x_continuous(name = "Distance to Nearest TSS (kb)", breaks = seq(0, 1, by = 0.2)*100) +
+  scale_y_continuous(labels = percent, name = "Percentile") 
+```
+
+<figure>
+<img
+src="differential_signal_sliding_files/figure-gfm/plot-dist-to-tss-1.png"
+alt="Distance to nearest TSS shown as percentiles, with the percentage of regions directly overlapping a TSS shown on the figure." />
+<figcaption aria-hidden="true">Distance to nearest TSS shown as
+percentiles, with the percentage of regions directly overlapping a TSS
+shown on the figure.</figcaption>
+</figure>
+
+``` r
+knitr::opts_chunk$set(eval = FALSE)
+```
+
+regions \<- GRangesList( promoter =
+gencode$transcript %>%  select(gene_id, ends_with("name")) %>%  promoters(upstream = 2500, downstream = 500) %>%  reduceMC() ) regions$upstream
+\<-
+gencode$transcript %>%  select(gene_id, ends_with("name")) %>%  resize(width = 1, fix = "start") %>%  shift_upstream(2500) %>%  promoters(upstream = 2500, downstream = 0) %>%  reduceMC() %>%  setdiffMC(regions$promoter)
+regions$exon <- gencode$exon %\>% select(gene_id, ends_with(“name”))
+%\>% setdiffMC(unlist(regions)) regions$intron <- gencode$gene %\>%
+select(gene_id, ends_with(“name”)) %\>% setdiffMC(unlist(regions))
+regions\$intergenic \<- GRanges(“chr10:42354900-100000000”) %\>%
+setdiff(unlist(regions), ignore.strand = TRUE)
+
+regions \<- read_rds(“data/chr10_region_subset.rds”) genes \<-
+import.gff(“data/chr10_gene_subset.gtf”)
+
+
+
+    For our mapping steps, we'll simply use the `promoters` element as these are 
+    the regions directly overlapping a TSS for all transcripts within this region 
+    of the genome.
+
+
+    ```r
+    results_gr <- mapByFeature(results_gr, genes = genes, prom = regions$promoters)
 
 Now we have our regions showing changed signal along with the likely
 regulatory targets. Our top-ranked region is as follows, and this
-appears to be associated with the gene *KCNMA1*.
+appears to be associated with the gene \*\*.
 
 ``` r
 arrange(results_gr, hmp)[1]
 ```
-
-    ## GRanges object with 1 range and 12 metadata columns:
-    ##       seqnames            ranges strand | n_windows      n_up    n_down
-    ##          <Rle>         <IRanges>  <Rle> | <integer> <integer> <integer>
-    ##   [1]    chr10 79266481-79268400      * |        38         3         0
-    ##       overlaps_ref            keyval_range    logCPM     logFC         hmp
-    ##          <logical>               <GRanges> <numeric> <numeric>   <numeric>
-    ##   [1]         TRUE chr10:79266721-79266840   7.60592   2.33531 1.35064e-13
-    ##           hmp_fdr      status         gene_id       gene_name
-    ##         <numeric> <character> <CharacterList> <CharacterList>
-    ##   [1] 7.50956e-11   Increased ENSG00000156113          KCNMA1
-    ##   -------
-    ##   seqinfo: 1 sequence from an unspecified genome
 
 ### Mapping of Windows to Regions
 
@@ -713,11 +1159,6 @@ results_gr %>%
   )
 ```
 
-![*Pie chart showing the best overlapping region for each merged
-windows. The best overlap is determined simply by the region with the
-lergest amount of
-overlap.*](differential_signal_sliding_files/figure-gfm/plot-pie-1.png)
-
 We can also scale by additional columns. Here, we’ll find the proportion
 of each window which overlaps each type of region, providing a complete
 summary of the proportion of our ranges which overlaps each feature.
@@ -740,10 +1181,6 @@ regions %>%
     cat_alpha = 0.5, cat_size = 4
   )
 ```
-
-![*Pie chart with regions scaled by width to show the proportions of the
-total regions which overlap each type of annotated
-region.*](differential_signal_sliding_files/figure-gfm/plot-pie-width-1.png)
 
 These results can be extended further using `plotSplitDonut()` to show
 more complex results.
@@ -770,10 +1207,6 @@ results_gr %>%
     explode_outer = "Promoter", explode_r = 0.2
   ) 
 ```
-
-![*Summary of regions with changed signal and the annotated region with
-the largest
-overlap*](differential_signal_sliding_files/figure-gfm/plot-split-donut-1.png)
 
 ## Profile Heatmaps
 
@@ -842,76 +1275,13 @@ max_peaks <- gr_increase %>%
 
 Now we’ve found the original windows with the strongest signal, we can
 define the profile data using the surrounding regions. Our widest region
-with significant change in signal is 5200bp, so let’s set our profiles
+with significant change in signal is 12640bp, so let’s set our profiles
 to be created stretching 10kb either side of the peak centre.
 
 ``` r
 pd <- getProfileData(bwfl, max_peaks, upstream = 1e4, log = FALSE)
 pd
 ```
-
-    ## GRangesList object of length 2:
-    ## $Veh
-    ## GRanges object with 33 ranges and 1 metadata column:
-    ##        seqnames            ranges strand |
-    ##           <Rle>         <IRanges>  <Rle> |
-    ##    [1]    chr10 79246860-79266859      * |
-    ##    [2]    chr10 88335820-88355819      * |
-    ##    [3]    chr10 79297340-79317339      * |
-    ##    [4]    chr10 76771460-76791459      * |
-    ##    [5]    chr10 72997140-73017139      * |
-    ##    ...      ...               ...    ... .
-    ##   [29]    chr10 67661660-67681659      * |
-    ##   [30]    chr10 63687060-63707059      * |
-    ##   [31]    chr10 79255940-79275939      * |
-    ##   [32]    chr10 44966940-44986939      * |
-    ##   [33]    chr10 79254900-79274899      * |
-    ##                                                 profile_data
-    ##                                         <SplitDataFrameList>
-    ##    [1]       1.1206:u1:-9900,0.7100:u2:-9700,1.3750:u3:-9500
-    ##    [2] 0.879397:u1:-9900,0.665000:u2:-9700,0.075000:u3:-9500
-    ##    [3]    1.23618:u1:-9900,0.99000:u2:-9700,0.37000:u3:-9500
-    ##    [4] 0.266332:u1:-9900,0.100000:u2:-9700,0.030000:u3:-9500
-    ##    [5]          0.375:u1:-9900,0.000:u2:-9700,0.365:u3:-9500
-    ##    ...                                                   ...
-    ##   [29]          0.000:u1:-9900,0.290:u2:-9700,0.075:u3:-9500
-    ##   [30] 0.296482:u1:-9900,0.135000:u2:-9700,0.235000:u3:-9500
-    ##   [31] 19.89500:u1:-9900,11.28500:u2:-9700, 5.71642:u3:-9500
-    ##   [32] 0.738693:u1:-9900,1.260000:u2:-9700,2.790000:u3:-9500
-    ##   [33]        8.590:u1:-9900,13.750:u2:-9700, 9.565:u3:-9500
-    ##   -------
-    ##   seqinfo: 1 sequence from an unspecified genome; no seqlengths
-    ## 
-    ## $DHT
-    ## GRanges object with 33 ranges and 1 metadata column:
-    ##        seqnames            ranges strand |
-    ##           <Rle>         <IRanges>  <Rle> |
-    ##    [1]    chr10 79246860-79266859      * |
-    ##    [2]    chr10 88335820-88355819      * |
-    ##    [3]    chr10 79297340-79317339      * |
-    ##    [4]    chr10 76771460-76791459      * |
-    ##    [5]    chr10 72997140-73017139      * |
-    ##    ...      ...               ...    ... .
-    ##   [29]    chr10 67661660-67681659      * |
-    ##   [30]    chr10 63687060-63707059      * |
-    ##   [31]    chr10 79255940-79275939      * |
-    ##   [32]    chr10 44966940-44986939      * |
-    ##   [33]    chr10 79254900-79274899      * |
-    ##                                                 profile_data
-    ##                                         <SplitDataFrameList>
-    ##    [1]    5.36181:u1:-9900,2.61500:u2:-9700,2.20000:u3:-9500
-    ##    [2]             0.00:u1:-9900,0.95:u2:-9700,0.50:u3:-9500
-    ##    [3] 0.708543:u1:-9900,1.500000:u2:-9700,0.740000:u3:-9500
-    ##    [4]             0.00:u1:-9900,0.28:u2:-9700,0.09:u3:-9500
-    ##    [5]             0.00:u1:-9900,1.05:u2:-9700,0.04:u3:-9500
-    ##    ...                                                   ...
-    ##   [29]             0.37:u1:-9900,0.00:u2:-9700,0.03:u3:-9500
-    ##   [30]             0.00:u1:-9900,0.74:u2:-9700,0.37:u3:-9500
-    ##   [31]       28.210:u1:-9900,16.725:u2:-9700, 7.270:u3:-9500
-    ##   [32]    2.88945:u1:-9900,0.56000:u2:-9700,1.73500:u3:-9500
-    ##   [33]       10.950:u1:-9900,15.230:u2:-9700,16.265:u3:-9500
-    ##   -------
-    ##   seqinfo: 1 sequence from an unspecified genome; no seqlengths
 
 This produces a `GRangesList` with a `GRanges` element for every file in
 the `BigWigFileList`, which has the profile data stored in the final
@@ -928,10 +1298,6 @@ plotProfileHeatmap(pd, "profile_data") +
   labs(fill = "Counts") +
   theme_bw()
 ```
-
-![*Profile Heatmap of the regions on chromosome 10 showing evidence for
-increased H3K27ac signal. Regions are centred at the point of maximal
-signal.*](differential_signal_sliding_files/figure-gfm/profile-heatmap-1.png)
 
 Note that H3K27ac often contains regions with significantly lower signal
 where the transcriptional machinery is instead occupying the DNA and as
@@ -967,9 +1333,6 @@ gr <- results_gr %>%
 plotHFGC(gr, cytobands = grch37.cytobands)
 ```
 
-![*Basic output from plotHFGC without any of the optional
-tracks*](differential_signal_sliding_files/figure-gfm/plot-empty-hfgc-1.png)
-
 ### Including Coverage
 
 In order to show our changed signal in context we can show the coverage
@@ -991,11 +1354,6 @@ plotHFGC(
 )
 ```
 
-![*Coverage for the region of interest, shown with a blue highlight.
-Note how the counts are lower in the highlighted region for the merged
-Veh coverage
-track.*](differential_signal_sliding_files/figure-gfm/plot-hfgc-coverge-1.png)
-
 ### Displaying Genes
 
 Next we might like to add gene models to provide the regulatory context.
@@ -1011,10 +1369,6 @@ plotHFGC(
   zoom = 30
 )
 ```
-
-![*Coverage for our region showing the relationship of signal to
-annotated
-genes*](differential_signal_sliding_files/figure-gfm/add-genes-1.png)
 
 ### Adding Features
 
@@ -1034,10 +1388,6 @@ plotHFGC(
   zoom = 30
 )
 ```
-
-![*The same figure as previously, but with annotated regions added as
-features. Any type of feature can be added
-here.*](differential_signal_sliding_files/figure-gfm/plot-hfgc-1.png)
 
 ### Adding HiC Interactions
 
@@ -1081,11 +1431,6 @@ plotHFGC(
 )
 ```
 
-![*The addition of an annotation track for the coverage tracks shows
-which regions were retained during the analysis, as well as those which
-were considered as showing changed or unchanged
-signal.*](differential_signal_sliding_files/figure-gfm/plot-annot-1.png)
-
 Plots are able to be tweaked considerably further via multiple
 parameters, however these basic approaches cover the core functionality
 of `plotHFCG()` for enabling simple & reproducible plotting across
@@ -1113,11 +1458,28 @@ e0191629.
 
 </div>
 
+<div id="ref-Hansen2012-jz" class="csl-entry">
+
+Hansen, Kasper D, Rafael A Irizarry, and Zhijin Wu. 2012. “Removing
+Technical Variability in <span class="nocase">RNA-seq</span> Data Using
+Conditional Quantile Normalization.” *Biostatistics* 13 (2): 204–16.
+
+</div>
+
+<div id="ref-Hicks2015-ee" class="csl-entry">
+
+Hicks, Stephanie C, and Rafael A Irizarry. 2015. “Quantro: A Data-Driven
+Approach to Guide the Choice of an Appropriate Normalization Method.”
+*Genome Biol.* 16 (1): 117.
+
+</div>
+
 <div id="ref-Law2014-xq" class="csl-entry">
 
 Law, Charity W, Yunshun Chen, Wei Shi, and Gordon K Smyth. 2014. “Voom:
-Precision Weights Unlock Linear Model Analysis Tools for <span
-class="nocase">RNA-seq</span> Read Counts.” *Genome Biol.* 15 (2): R29.
+Precision Weights Unlock Linear Model Analysis Tools for
+<span class="nocase">RNA-seq</span> Read Counts.” *Genome Biol.* 15 (2):
+R29.
 
 </div>
 
@@ -1140,9 +1502,10 @@ Windows.” *Nucleic Acids Res.* 44 (5): e45.
 <div id="ref-Lund2012-xo" class="csl-entry">
 
 Lund, Steven P, Dan Nettleton, Davis J McCarthy, and Gordon K Smyth.
-2012. “Detecting Differential Expression in <span
-class="nocase">RNA-sequence</span> Data Using Quasi-Likelihood with
-Shrunken Dispersion Estimates.” *Stat. Appl. Genet. Mol. Biol.* 11 (5).
+2012. “Detecting Differential Expression in
+<span class="nocase">RNA-sequence</span> Data Using Quasi-Likelihood
+with Shrunken Dispersion Estimates.” *Stat. Appl. Genet. Mol. Biol.* 11
+(5).
 
 </div>
 
@@ -1151,6 +1514,23 @@ Shrunken Dispersion Estimates.” *Stat. Appl. Genet. Mol. Biol.* 11 (5).
 McCarthy, Davis J, and Gordon K Smyth. 2009. “Testing Significance
 Relative to a Fold-Change Threshold Is a TREAT.” *Bioinformatics* 25
 (6): 765–71.
+
+</div>
+
+<div id="ref-Molder2021-mo" class="csl-entry">
+
+Mölder, Felix, Kim Philipp Jablonski, Brice Letcher, Michael B Hall,
+Christopher H Tomkins-Tinch, Vanessa Sochat, Jan Forster, et al. 2021.
+“Sustainable Data Analysis with Snakemake.” *F1000Res.* 10 (January):
+33.
+
+</div>
+
+<div id="ref-Robinson2010-qp" class="csl-entry">
+
+Robinson, Mark D, and Alicia Oshlack. 2010. “A Scaling Normalization
+Method for Differential Expression Analysis of
+<span class="nocase">RNA-seq</span> Data.” *Genome Biol.* 11 (3): R25.
 
 </div>
 
@@ -1171,14 +1551,6 @@ Dependent Tests.” *Proc. Natl. Acad. Sci. U. S. A.* 116 (4): 1195–1200.
 
 </div>
 
-<div id="ref-Zhang2008-ms" class="csl-entry">
-
-Zhang, Yong, Tao Liu, Clifford A Meyer, Jérôme Eeckhoute, David S
-Johnson, Bradley E Bernstein, Chad Nusbaum, et al. 2008. “Model-Based
-Analysis of ChIP-Seq (MACS).” *Genome Biol.* 9 (9): R137.
-
-</div>
-
 </div>
 
 <br>
@@ -1188,112 +1560,3 @@ Analysis of ChIP-Seq (MACS).” *Genome Biol.* 9 (9): R137.
 ``` r
 sessionInfo()
 ```
-
-    ## R version 4.3.0 (2023-04-21)
-    ## Platform: x86_64-pc-linux-gnu (64-bit)
-    ## Running under: Ubuntu 20.04.6 LTS
-    ## 
-    ## Matrix products: default
-    ## BLAS:   /usr/lib/x86_64-linux-gnu/blas/libblas.so.3.9.0 
-    ## LAPACK: /usr/lib/x86_64-linux-gnu/lapack/liblapack.so.3.9.0
-    ## 
-    ## locale:
-    ##  [1] LC_CTYPE=en_AU.UTF-8       LC_NUMERIC=C              
-    ##  [3] LC_TIME=en_AU.UTF-8        LC_COLLATE=en_AU.UTF-8    
-    ##  [5] LC_MONETARY=en_AU.UTF-8    LC_MESSAGES=en_AU.UTF-8   
-    ##  [7] LC_PAPER=en_AU.UTF-8       LC_NAME=C                 
-    ##  [9] LC_ADDRESS=C               LC_TELEPHONE=C            
-    ## [11] LC_MEASUREMENT=en_AU.UTF-8 LC_IDENTIFICATION=C       
-    ## 
-    ## time zone: Australia/Adelaide
-    ## tzcode source: system (glibc)
-    ## 
-    ## attached base packages:
-    ## [1] stats4    stats     graphics  grDevices utils     datasets  methods  
-    ## [8] base     
-    ## 
-    ## other attached packages:
-    ##  [1] ggside_0.2.2                scales_1.2.1               
-    ##  [3] plyranges_1.20.0            extraChIPs_1.4.1           
-    ##  [5] patchwork_1.1.2             edgeR_3.42.2               
-    ##  [7] limma_3.56.1                rtracklayer_1.60.0         
-    ##  [9] BiocParallel_1.34.2         csaw_1.34.0                
-    ## [11] SummarizedExperiment_1.30.1 Biobase_2.60.0             
-    ## [13] MatrixGenerics_1.12.0       matrixStats_0.63.0         
-    ## [15] Rsamtools_2.16.0            Biostrings_2.68.1          
-    ## [17] XVector_0.40.0              GenomicRanges_1.52.0       
-    ## [19] GenomeInfoDb_1.36.0         IRanges_2.34.0             
-    ## [21] S4Vectors_0.38.1            BiocGenerics_0.46.0        
-    ## [23] lubridate_1.9.2             forcats_1.0.0              
-    ## [25] stringr_1.5.0               dplyr_1.1.2                
-    ## [27] purrr_1.0.1                 readr_2.1.4                
-    ## [29] tidyr_1.3.0                 tibble_3.2.1               
-    ## [31] ggplot2_3.4.2               tidyverse_2.0.0            
-    ## 
-    ## loaded via a namespace (and not attached):
-    ##   [1] splines_4.3.0              BiocIO_1.10.0             
-    ##   [3] bitops_1.0-7               filelock_1.0.2            
-    ##   [5] polyclip_1.10-4            XML_3.99-0.14             
-    ##   [7] rpart_4.1.19               lifecycle_1.0.3           
-    ##   [9] doParallel_1.0.17          lattice_0.21-8            
-    ##  [11] ensembldb_2.24.0           MASS_7.3-60               
-    ##  [13] backports_1.4.1            magrittr_2.0.3            
-    ##  [15] Hmisc_5.1-0                rmarkdown_2.21            
-    ##  [17] yaml_2.3.7                 metapod_1.8.0             
-    ##  [19] Gviz_1.44.0                DBI_1.1.3                 
-    ##  [21] RColorBrewer_1.1-3         zlibbioc_1.46.0           
-    ##  [23] AnnotationFilter_1.24.0    biovizBase_1.48.0         
-    ##  [25] RCurl_1.98-1.12            nnet_7.3-18               
-    ##  [27] VariantAnnotation_1.46.0   tweenr_2.0.2              
-    ##  [29] rappdirs_0.3.3             circlize_0.4.15           
-    ##  [31] GenomeInfoDbData_1.2.10    ggrepel_0.9.3             
-    ##  [33] codetools_0.2-19           DelayedArray_0.26.3       
-    ##  [35] xml2_1.3.4                 ggforce_0.4.1             
-    ##  [37] tidyselect_1.2.0           shape_1.4.6               
-    ##  [39] futile.logger_1.4.3        farver_2.1.1              
-    ##  [41] ComplexUpset_1.3.3         BiocFileCache_2.8.0       
-    ##  [43] base64enc_0.1-3            GenomicAlignments_1.36.0  
-    ##  [45] GetoptLong_1.0.5           Formula_1.2-5             
-    ##  [47] iterators_1.0.14           foreach_1.5.2             
-    ##  [49] tools_4.3.0                progress_1.2.2            
-    ##  [51] Rcpp_1.0.10                glue_1.6.2                
-    ##  [53] gridExtra_2.3              xfun_0.39                 
-    ##  [55] withr_2.5.0                BiocManager_1.30.20       
-    ##  [57] formatR_1.14               fastmap_1.1.1             
-    ##  [59] latticeExtra_0.6-30        fansi_1.0.4               
-    ##  [61] digest_0.6.31              timechange_0.2.0          
-    ##  [63] R6_2.5.1                   colorspace_2.1-0          
-    ##  [65] jpeg_0.1-10                dichromat_2.0-0.1         
-    ##  [67] biomaRt_2.56.0             RSQLite_2.3.1             
-    ##  [69] utf8_1.2.3                 generics_0.1.3            
-    ##  [71] data.table_1.14.8          prettyunits_1.1.1         
-    ##  [73] InteractionSet_1.28.0      httr_1.4.6                
-    ##  [75] htmlwidgets_1.6.2          S4Arrays_1.0.4            
-    ##  [77] pkgconfig_2.0.3            gtable_0.3.3              
-    ##  [79] blob_1.2.4                 ComplexHeatmap_2.16.0     
-    ##  [81] htmltools_0.5.5            ProtGenerics_1.32.0       
-    ##  [83] clue_0.3-64                png_0.1-8                 
-    ##  [85] knitr_1.43                 lambda.r_1.2.4            
-    ##  [87] rstudioapi_0.14            tzdb_0.4.0                
-    ##  [89] rjson_0.2.21               checkmate_2.2.0           
-    ##  [91] curl_5.0.0                 cachem_1.0.8              
-    ##  [93] GlobalOptions_0.1.2        parallel_4.3.0            
-    ##  [95] foreign_0.8-84             AnnotationDbi_1.62.1      
-    ##  [97] restfulr_0.0.15            pillar_1.9.0              
-    ##  [99] grid_4.3.0                 vctrs_0.6.2               
-    ## [101] dbplyr_2.3.2               cluster_2.1.4             
-    ## [103] htmlTable_2.4.1            evaluate_0.21             
-    ## [105] VennDiagram_1.7.3          EnrichedHeatmap_1.30.0    
-    ## [107] GenomicFeatures_1.52.0     cli_3.6.1                 
-    ## [109] locfit_1.5-9.7             compiler_4.3.0            
-    ## [111] futile.options_1.0.1       rlang_1.1.1               
-    ## [113] crayon_1.5.2               labeling_0.4.2            
-    ## [115] interp_1.1-4               stringi_1.7.12            
-    ## [117] viridisLite_0.4.2          deldir_1.0-9              
-    ## [119] munsell_0.5.0              lazyeval_0.2.2            
-    ## [121] Matrix_1.5-4.1             BSgenome_1.68.0           
-    ## [123] hms_1.1.3                  bit64_4.0.5               
-    ## [125] KEGGREST_1.40.0            highr_0.10                
-    ## [127] igraph_1.4.3               broom_1.0.4               
-    ## [129] memoise_2.0.1              bit_4.0.5                 
-    ## [131] GenomicInteractions_1.34.0
