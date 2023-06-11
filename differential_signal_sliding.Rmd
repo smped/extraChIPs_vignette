@@ -24,7 +24,7 @@ knitr::opts_chunk$set(
 ```
 
 
-# Introduction
+## Introduction
 
 The [GRAVI](https://github.com/smped/GRAVI) workflow, for which this package 
 is designed, uses sliding windows for differential signal analysis using 
@@ -53,9 +53,9 @@ However, when following this workflow across an entire genome, memory
 requirements may exceed those of a standard laptop, and an HPC or 
 high-performance workstation may be required.
 
-# Setup 
+## Setup 
 
-## Installation
+### Installation
 
 In order to use the package `extraChIPs` and follow this vignette, we recommend 
 using the package `BiocManager` (hosted on CRAN) to install all packages.
@@ -97,7 +97,7 @@ theme_set(theme_bw())
 ```
 
 
-## Data
+### Data
 
 All data for this vignette is expected to be in a sub-directory of the working 
 directory named "data" (including "data/H3K27ac"), and all paths will be
@@ -131,9 +131,9 @@ names(treat_colours) <- c(levels(samples$treatment), "Input")
 ```
 
 
-# Differential Signal Analysis
+## Differential Signal Analysis
 
-## Sliding Windows
+### Sliding Windows
 
 The standard approach of tools such as DiffBind [@DiffBind2012] is to take a set
 of peaks, re-centre them, then set all regions to be the same width.
@@ -260,7 +260,7 @@ plotAssayDensities(wincounts, colour = "treatment", trans = "log1p") +
 ```
 
 
-## Filtering of Sliding Windows
+### Filtering of Sliding Windows
 
 After counting all reads in the sliding genomic windows, the next step is to 
 discard windows for which counts are unlikely to represent true signal from our 
@@ -329,7 +329,7 @@ rowRanges(filtcounts)
 mean(rowRanges(filtcounts)$overlaps_ref)
 ```
 
-## Initial Visualisation
+### Initial Visualisation
 
 Inspecting your data is a common first step, and a common QC step is Relative 
 Log-Expression (RLE) [@Gandolfo2018-oc].
@@ -368,7 +368,7 @@ plotAssayPCA(filtcounts, "logCPM", colour = "treatment", label = "accession") +
   theme_bw()
 ```
 
-## Statistical Testing
+### Statistical Testing
 
 Multiple methods are enabled in the package `extraChIPs` via the function 
 `fitAssayDiff()`, with the possibility of incorporating any additional 
@@ -404,7 +404,7 @@ fit_gr <- fitAssayDiff(filtcounts, design = X, fc = 1.2, asRanges = TRUE)
 ```
 
 
-## Merging Windows
+### Merging Windows
 
 After an analysis has been performed, values contained in the output will
 be estimated signal (`logCPM`), estimated change (`logFC`) with both raw and 
@@ -508,7 +508,7 @@ results_gr %>%
 ```
 
 
-## Alternative Normalisation Approaches
+### Alternative Normalisation Approaches
 
 Using Library Size normalisation, as above, is a conservative approach and other
 methods such as RLE [@DESeq22014] or TMM [@Robinson2010-qp] may be appropriate.
@@ -536,7 +536,7 @@ Here, no differences were evident across median values (ANOVA p =
 `r round(anova(qtest)[["Pr(>F)"]][[1]], 3)`) or between distributions (p = 
 `r qtest@quantroPvalPerm`) and as such, TMM/RLE normalisation may be appropriate.
 
-### TMM Normalisation
+#### TMM Normalisation
 
 To perform an analysis using TMM-normalisation, we can simply provide this to 
 `fitAssayDiff()`
@@ -546,25 +546,33 @@ tmm_gr <- fitAssayDiff(
   filtcounts, design = X, fc = 1.2, norm = "TMM", asRanges = TRUE
 )
 tmm_results <- mergeByHMP(tmm_gr, inc_cols = "overlaps_ref", merge_within = 120)
+tmm_results$status <- case_when(
+  tmm_results$hmp_fdr > 0.05 ~ "Unchanged",
+  tmm_results$logFC < 0 ~ "Decreased",
+  tmm_results$logFC > 0 ~ "Increased"
+)
+table(tmm_results$status)
 ```
 
 As might be expected, the results are highly concordant, with TMM-normalisation 
 providing a moderate improvement in statistical power, returning 
 `r sum(tmm_results$hmp_fdr < 0.05)` windows with evidence of differential 
 signal, instead of the initial `r sum(results_gr$hmp_fdr < 0.05)`.
-Any of the methods taken by `edgeR::calacNormFactors()` can be used here.
+Any of the normalisation methods taken by `edgeR::calcNormFactors()` can be 
+used here.
 
 If a difference in distributions is found between groups, the normalisation 
 step can be set to only occur within treatment groups, by passing the grouping
 column name to the `groups = ` argument.
 However, this may exaggerate differences between groups and may introduce false
-positives.
+positives, so should only be used when compelling evidence exists and the 
+underlying biology supports this.
 
 Checking MA-plots shows that the very slight negative bias in higher-signal 
 windows when using library size normalisation (seen above) was lessened after 
 TMM normalisation.
 
-```{r plot-ma-tmm, fig.cap = "MA plot using TMM normalisation. The blue line corresponds to a loess curve fitted through the points."}
+```{r plot-ma-tmm, fig.cap = "MA plot for all sliding windows using TMM normalisation. The blue line corresponds to a loess curve fitted through the points."}
 tmm_gr %>% 
   as_tibble() %>% 
   ggplot(aes(logCPM, logFC)) +
@@ -574,7 +582,7 @@ tmm_gr %>%
 ```
 
 
-### GC Bias
+#### GC Bias
 
 As GC-bias is a known issue in high-throughput sequencing, additional packages 
 such as `cqn` can also be incorporated in an analytic workflow with `extraChIPs`.
@@ -711,7 +719,9 @@ cqn_lt_results <- mergeByHMP(cqn_lt_gr, inc_cols = "overlaps_ref", merge_within 
 ```
 
 
-## Mapping of Windows To Genes
+## Mapping of Windows
+
+### Mapping to Genes
 
 Once the changes in signal for our given ChIP target have been determined, a 
 common next step is to assess which genes are likely to be impacted.
@@ -730,27 +740,30 @@ result.
 These steps are:
 
 1. **Check for any HiC interactions**
-+ All genes which directly overlap an interaction anchor are considered part 
+    + All genes which directly overlap an interaction anchor are considered part 
 of the regulatory network for that interaction, and as such, all genes 
 associated with both anchors are assigned to a peak which overlaps a HiC 
 Interaction
 2. **Check for any overlaps with a promoter** 
-+ All genes regulated by that promoter are assigned as regulatory targets.
+    + All genes regulated by that promoter are assigned as regulatory targets.
 By default, this is by direct promoter/gene overlap (`prom2gene = 0`)
 3. **Check for any overlaps with an enhancer**
-+ Peaks which overlap an enhancer are assigned to *all* genes within the 
+    + Peaks which overlap an enhancer are assigned to *all* genes within the 
 distance specified by `enh2gene` (default = 100kb)
 4. **Check for genes with no previous mappings**
-+ Peaks *with no previous mappings* are assigned to all directly overlapping 
+    + Peaks *with no previous mappings* are assigned to all directly overlapping 
 genes, or the nearest gene within a specified distance 
 (default `gr2gene` = 100kb)
 
-As a result, if no promoters, enhancers or long-range interactions are 
-supplied, all genes will be mapped to peaks using step 4.
+If no promoters, enhancers or long-range interactions are supplied, all genes 
+will be mapped to peaks using step 4.
 
-A set of annotated regions has been provided for our subset of chromosome 10, as
-has the set of genes within this region.
-These can be loaded as follows.
+A GTF of annotations can be used, with the following being the genes, 
+transcripts and exons from chr10, taken from [Gencode v43](https://www.gencodegenes.org/human/release_43lift37.html).
+Whilst this example relies on this format, any additional resource such as an 
+`EnsDb` or `TxDb` object could easily be used.
+Here, we'll load the data then split into a `GRangesList` with separate elements 
+for genes, transcripts and exons.
 
 ```{r load-annotations}
 gencode <- here("data/gencode.v43lift37.chr10.annotation.gtf.gz") %>% 
@@ -759,56 +772,30 @@ gencode <- here("data/gencode.v43lift37.chr10.annotation.gtf.gz") %>%
   split(.$type)
 seqlevels(gencode) <- seqlevels(sq)
 seqinfo(gencode) <- sq
+```
+
+Now we've loaded our gene annotations at multiple levels, we can easily define 
+Transcription Start Sites (TSS) using transcript definitions and the function 
+`reduceMC()`.
+This function is an extension of `GenomicRanges::reduce()` which retains all 
+supplied columns in the `mcols()` element by collapsing these into 
+`CompressedList` columns, and simplifying to vectors where possible.
+
+```{r get-tss-promoters}
 tss <- gencode$transcript %>% 
   resize(width = 1, fix = "start") %>% 
   select(gene_id, ends_with("name")) %>% 
   reduceMC(min.gapwidth = 0)
-promoters <- gencode$transcript %>% 
-    select(gene_id, ends_with("name")) %>% 
-    promoters(upstream = 2500, downstream = 500) %>% 
-    reduceMC(simplify = FALSE)
 ```
 
-```{r map-genes}
-tmm_results <- tmm_results %>% 
-  mutate(
-    status = case_when(
-      hmp_fdr >= 0.05 ~ "Unchanged",
-      logFC > 0 ~ "Increased",
-      logFC < 0 ~ "Decreased"
-    ),
-    tss = overlapsAny(., tss)
-  ) %>% 
-  mapByFeature(
-    genes = gencode$gene,
-    prom = select(promoters, gene_id, gene_name)
-  )
-tmm_results %>% 
-  filter(hmp_fdr < 0.05) %>% 
-  arrange(hmp)
+Checking the TSS for *PPIF* shows we have one site which 3 transcripts start at, 
+along with two more unique to specific transcripts.
+
+```{r show-tss}
+subset(tss, vapply(gene_name, function(x) "PPIF" %in% x, logical(1)))
 ```
 
-```{r plot-ma-mapped, fig.cap = "MA-plot with the top 12 regions by significance labelled according to the most likely gene "}
-tmm_results %>% 
-  as_tibble() %>% 
-  ggplot(aes(logCPM, logFC, colour = status)) +
-  geom_point() +
-  geom_label_repel(
-    aes(label = label),
-    data = . %>% 
-      arrange(hmp) %>% 
-      dplyr::slice(1:12) %>% 
-      mutate(
-        label  = vapply(gene_name, paste, character(1), collapse = "; ") %>% 
-          str_trunc(30)
-      ),
-    fill = "white", alpha = 0.6, show.legend = FALSE
-  ) +
-  scale_colour_manual(
-    values = c(Unchanged = "grey30", Increased = "red3", Decreased = "royalblue")
-  ) 
-```
-
+Now we can check our distribution of regions in reference to TSS sites
 
 ```{r plot-dist-to-tss, fig.cap = "Distance to nearest TSS shown as percentiles, with the percentage of regions directly overlapping a TSS shown on the figure."}
 tmm_results %>% 
@@ -820,68 +807,298 @@ tmm_results %>%
   ggplot(aes(distance / 1e3, p)) +
   geom_line() +
   geom_label_repel(
-    aes(label = percent(p)), 
+    aes(label = label), 
     data = . %>% 
       dplyr::filter(distance == 0) %>% 
-      dplyr::filter(p == max(p))
+      dplyr::filter(p == max(p)) %>% 
+      mutate(label = glue("{percent(p)} TSS\nOverlap")),
+    alpha =  0.7
   ) +
   scale_x_continuous(name = "Distance to Nearest TSS (kb)", breaks = seq(0, 1, by = 0.2)*100) +
   scale_y_continuous(labels = percent, name = "Percentile") 
 ```
 
-```{r}
-knitr::opts_chunk$set(eval = FALSE)
+We can also add the TSS overlap status to our set of results
+
+
+```{r add-tss}
+tmm_results$tss <- overlapsAny(tmm_results, tss)
+```
+
+
+Next we'll want to map our regions to genes.
+To use the methods available in `mapByFeature()` let's define a set of promoters.
+First we'll create a promoter for each transcript, then we can merge any 
+overlapping promoters using `reduceMC()`.
+Setting `simplify = FALSE` avoids an issue in this subset of genes where one 
+gene has multiple IDs, and helps retain a 1:1 mapping between IDs and genes.
+Importantly, this will give a set of promoters which are unique and 
+non-overlapping but with variable width and with the complete set of transcripts 
+that may be regulated by the promoter listed.
+As can be seen, 4 potential promoter regions are found for *CRTAC1*
+
+```{r get-promoters}
+promoters <- gencode$transcript %>% 
+    select(gene_id, ends_with("name")) %>% 
+    promoters(upstream = 2500, downstream = 500) %>% 
+    reduceMC(simplify = FALSE)
+tail(promoters)
+```
+
+```{r map-genes}
+tmm_results <- mapByFeature(
+  tmm_results, genes = gencode$gene,
+  prom = select(promoters, gene_id, gene_name)
+)
+tmm_results %>% filter(hmp_fdr < 0.05) %>% arrange(hmp)
+```
+
+So now we have our regions showing differential signal, along with which gene 
+they are most likely to be impacting, and whether they directly overlap the TSS.
+
+
+```{r plot-ma-mapped, fig.cap = "MA-plot with the top 20 regions by significance labelled according to the most likely gene. Regions which directly overlap a TSS are shown as empty circles"}
+status_colours <- c(Unchanged = "grey70", Increased = "red3", Decreased = "royalblue")
+tmm_results %>% 
+  as_tibble() %>% 
+  ggplot(aes(logCPM, logFC, colour = status, shape = tss)) +
+  geom_point() +
+  geom_label_repel(
+    aes(label = label),
+    data = . %>% 
+      arrange(hmp) %>% 
+      dplyr::slice(1:20) %>% 
+      mutate(
+        label  = vapply(gene_name, paste, character(1), collapse = "; ") %>% 
+          str_trunc(30)
+      ),
+    fill = "white", alpha = 0.6, show.legend = FALSE
+  ) +
+  scale_colour_manual(values = status_colours) +
+  scale_shape_manual(values = c(19, 21))
 ```
 
 
 
-```r
-regions <- GRangesList(
-  promoter = gencode$transcript %>% 
-    select(gene_id, ends_with("name")) %>% 
-    promoters(upstream = 2500, downstream = 500) %>% 
-    reduceMC()
-)
+### Mapping to Regions
+
+In addition to which gene is likely to be directly impacted by the detected 
+signal, knowing which type of regulatory region signal was observed in is 
+another question commonly asked of ChIP-Seq data.
+We've already defined our promoters, so let's keep using `reduceMC()` along 
+with `setdiffMC()` to define unique *upstream promoter*, *exon*, *intron* and 
+*intergenic* regions.
+
+First we'll shift our start sites upstream by 2.5kb, then we can extend another 
+2.5kb to define regions 5kb upstream from a TSS.
+Then we'll merge overlapping regions using `reduceMC()` and separate these from 
+any promoters we've already defined using `setdiffMC()`
+
+```{r define-upstream}
+regions <- GRangesList(promoter = promoters)
 regions$upstream <- gencode$transcript %>% 
   select(gene_id, ends_with("name")) %>% 
   resize(width = 1, fix = "start") %>% 
   shift_upstream(2500) %>% 
   promoters(upstream = 2500, downstream = 0) %>% 
   reduceMC() %>% 
-  setdiffMC(regions$promoter)
+  setdiffMC(regions$promoter, ignore.strand = TRUE)
+```
+
+We can use a similar approach to define exons, not already classified as being 
+within a promoter, and introns not already assigned as promoters.
+
+```{r define-introns}
 regions$exon <- gencode$exon %>% 
   select(gene_id, ends_with("name")) %>% 
-  setdiffMC(unlist(regions))
+  setdiffMC(unlist(regions), ignore.strand = TRUE) 
 regions$intron <- gencode$gene %>% 
   select(gene_id, ends_with("name")) %>% 
-  setdiffMC(unlist(regions))
+  setdiffMC(unlist(regions), ignore.strand = TRUE) 
+```
+
+For our intergenic regions, there will be no gene information so we can simply 
+use the slightly faster `setdiff()` function.
+
+```{r define-intergenic}
 regions$intergenic <- GRanges("chr10:42354900-100000000") %>% 
   setdiff(unlist(regions), ignore.strand = TRUE)
-  
+```
 
-regions <- read_rds("data/chr10_region_subset.rds")
-genes <- import.gff("data/chr10_gene_subset.gtf")
+Using the function `bestOverlap()` we can assign each window with ChIP-Seq 
+signal to the region which it shows the greatest overlap, setting this as a 
+factor which reflects the hierarchy with which the regions were defined.
+
+
+```{r best-overlap}
+tmm_results$bestOverlap <- bestOverlap(tmm_results, regions) %>% 
+  factor(levels = names(regions))
+tmm_results %>% filter(hmp_fdr < 0.05, bestOverlap == "promoter")
 ```
 
 
-For our mapping steps, we'll simply use the `promoters` element as these are 
-the regions directly overlapping a TSS for all transcripts within this region 
-of the genome.
+## Visualisation of Results
 
-```{r map-to-genes}
-results_gr <- mapByFeature(results_gr, genes = genes, prom = regions$promoters)
+### Pie Charts
+
+Now that we've assigned each window to a genomic regions, we can use `plotPie()`
+to view the distribution of ChIP-Seq signal within these regions.
+First we'll define a consistent colour palette for these regions in all plots.
+
+```{r plot-pie-generic, fig.cap = "Pie chart showing the distribution of ChIP-Seq signal within our defined genomic regions."}
+region_colours <- hcl.colors(length(regions), "Viridis", rev = TRUE)
+names(region_colours) <- names(regions)
+plotPie(tmm_results, fill = "bestOverlap") +
+  scale_fill_manual(values = region_colours)
 ```
 
-Now we have our regions showing changed signal along with the likely regulatory 
-targets.
-Our top-ranked region is as follows, and this appears to be associated with the 
-gene *`r arrange(results_gr, hmp)$gene_name[[1]]`*.
+Labels produced using `plotPie()` use the `glue()` syntax and are able to access 
+the summarised data using `N` as the overall total number of sites. as well as
+`.data[[fill]]` to access data in the column selected to fill the pie segments.
+Totals and percentages within each segment are accessible using `n` and `p` 
+respectively as these are columns within the internal `data.frame` formed when 
+creating the plot.
+External formatting functions such as `comma()`, `percent()` or `str_to_title()` 
+can also be put to good use here.
 
-```{r top-ranked}
-arrange(results_gr, hmp)[1]
+```{r plot-pie-labels, fig.cap = "Pie chart showing customised labels. Here the regions have been modified to use Title case in the labels, but without modifying the underlying data."}
+plotPie(
+  tmm_results, fill = "bestOverlap",
+  cat_glue = "{str_to_title(.data[[fill]])}\n{comma(n, 1)}\n({percent(p, 0.1)})"
+) +
+  scale_fill_manual(values = region_colours)
 ```
 
-### Mapping of Windows to Regions
+In addition to highly customisable labels, segments can be scaled by width to 
+produce segments representing the overlaps in kb instead of counts.
+
+```{r plot-pie-width, fig.cap = "Pie chart with sgments scaled by width of ChIP-Seq regions"}
+plotPie(
+  tmm_results, fill = "bestOverlap", scale_by = "width",
+  total_glue = "{comma(N)}kb", total_size = 5,
+  cat_glue = "{str_to_title(.data[[fill]])}\n({percent(p, 0.1)})",
+  cat_size = 4, cat_adj = 0.1, min_p = 0.04
+) +
+  scale_fill_manual(values = region_colours)
+```
+
+### Split Donut Charts
+
+Pie charts can be further extended into Split-Donut charts, with data in two rings.
+The default settings can be used to add the status of each window to the 
+overlapping regions.
+
+```{r plot-donut-default, fig.cap = "Split-Donut chart showing status with overlapping region"}
+plotSplitDonut(
+  tmm_results, inner = "bestOverlap", outer = "status",
+  inner_palette = region_colours
+)
+```
+
+A key advantage of `plotSplitDonut()` is the ability to provide separate colour 
+palettes for the inner & outer rings
+
+```{r plot-donut-both-palettes, fig.cap = "Split-Donut chart using separate colour palettes for inner and outer rings"}
+plotSplitDonut(
+  tmm_results, inner = "bestOverlap", outer = "status", 
+  inner_palette = region_colours, outer_palette = status_colours
+)
+```
+
+Once again these are heavily customisable using the `glue()` syntax for labels and exploding key segments of interest.
+
+```{r plot-donut-customised, fig.cap = "Split-Donut chart exploding key regions and customising labels."}
+plotSplitDonut(
+  tmm_results, inner = "bestOverlap", outer = "status", 
+  inner_palette = region_colours, outer_palette = status_colours,
+  inner_glue = "{str_to_title(.data[[inner]])}\nn = {comma(n)}\n{percent(p,0.1)}",
+  outer_glue = "{.data[[outer]]}\n{str_to_title(.data[[inner]])}\nn = {n}",
+  explode_outer = "(In|De)creased", explode_r = 0.3, 
+  outer_label = "text", outer_min_p = 0, outer_max_p = 0.02
+)
+```
+
+
+### Coverage Plots
+
+In order to show our changed signal in context we can show the coverage using a
+`BigWigFileList` and the function `plotHFGC()`
+If providing a `BigWigFileList`, separate tracks will drawn for each element of 
+the object.
+In more complex scenarios where multiple targets are required a list of 
+`BigWigFileList`s can be provided and each element will then be drawn as a track 
+with overlapping coverage within each BigWigFileList.
+
+```{r create-bwfl}
+bwfl <- here::here(
+  "data", "H3K27ac", glue("{levels(samples$treatment)}_cov_chr10.bw")
+) %>% 
+  BigWigFileList() %>% 
+  setNames(levels(samples$treatment))
+```
+
+We can also include cytogenetic bands for these coverage plots, which are 
+provided with `extraChIPs`
+
+```{r load-cytobands}
+data("grch37.cytobands")
+head(grch37.cytobands)
+```
+
+Let's check the coverage across out most highly-ranked region with default 
+settings.
+
+
+```{r plot-hfgc-init, fig.cap = "Generic figure from plotHFGC showing coverage for the selected region only"}
+gr <- filter(tmm_results, hmp_fdr < 0.05, bestOverlap == "promoter")[1]
+gr <- keepStandardChromosomes(gr)
+plotHFGC(gr, cytobands = grch37.cytobands, coverage = bwfl)
+```
+
+The y-axes for the two treatments are clearly different and we can use the same 
+colour scheme as previously.
+We can overlap the two treatments by providing the coverage as a list of 
+`BigWigFileList` objects.
+Colours will need to now be provided in a list with matching structure.
+Zooming out may also give a little better context
+
+```{r plot-hfgc-cov, fig.cap = "Zoomed out version of the above with coverage plots set to overlap"}
+cov_list <- list(H3K27ac = bwfl)
+cov_colour <- list(H3K27ac = treat_colours[levels(samples$treatment)])
+plotHFGC(
+  gr, cytobands = grch37.cytobands, 
+  coverage =  cov_list, linecol = cov_colour, zoom = 50, rotation.title = 90
+)
+```
+
+#### Displaying Genes
+
+Next we might like to add gene models to provide the regulatory context.
+These are supplied here in the layout required by the defaults of the 
+`GeneRegionTrack()` function, with all exons and transcripts annotated.
+
+```{r load-gene-models}
+gene_models <- gencode$exon %>% 
+  select(
+    type, gene = gene_id, exon = exon_id, transcript = transcript_id, 
+    symbol = gene_name
+  ) %>% 
+  keepStandardChromosomes()
+```
+
+
+```{r plot-hfgc-with-genes, fig.cap = "*Coverage for our region showing the relationship of signal to annotated genes*"}
+plotHFGC(
+  gr, cytobands = grch37.cytobands, 
+  coverage =  cov_list, linecol = cov_colour,
+  genes = gene_models, genecol = "wheat", collapseTranscripts = FALSE,
+  zoom = 50, rotation.title = 90, covsize = 10, genesize = 1
+)
+```
+
+#### Adding Features
+
+#### Mapping of Windows to Regions
 
 If we also have a set of annotated regions, we can easily map our regions to 
 the region that it has the greatest proportion of overlap.
@@ -889,102 +1106,80 @@ First, we'll arrange our regions to be a single `GRanges` object with the column
 "region".
 From these we cn simply add the column `bestRegion`
 
-```{r map-to-regions}
-regions_gr <- regions %>% 
-  lapply(select, region) %>% 
-  GRangesList() %>% 
-  unlist() %>% 
-  sort() %>% 
-  setNames(NULL)
-region_levels <- vapply(regions, function(x) x$region[1], character(1))
-results_gr$bestRegion <- results_gr %>% 
-  bestOverlap(regions_gr, var = "region") %>% 
-  fct(levels = region_levels)
+
+Another useful track to add might be some key features such as promoters and 
+other annotated regions.
+Features must **always** be a `GRangesList`, with each element defining a 
+different type of feature, as we already have in our `regions_gr` object.
+
+```{r plot-hfgc-with-regions, fig.cap = "*The same figure as previously, but with annotated regions added as features. Any type of feature can be added here.*"}
+regions <- keepStandardChromosomes(regions)
+plotHFGC(
+  gr, cytobands = grch37.cytobands, 
+  features = regions, featcol = region_colours, featstack = "dense",
+  coverage =  cov_list, linecol = cov_colour,
+  genes = gene_models, genecol = "wheat", collapseTranscripts = FALSE,
+  zoom = 50, rotation.title = 90, covsize = 10, genesize = 1, featsize = 5
+)
 ```
 
 
-# Visualisation of Results
+#### Adding Annotations To Coverage
 
-## Association with Annotated Features
+An indication of which regions are associated with increased or decreased 
+ChIP signal can also be a useful annotation to add to plots such as the above.
+Although we technically performed no statistical testing, let's consider a
+window with logFC below -1 to be showing decreased signal.
 
-The association of windows or peaks with defined features, such as histone 
-marks or regulatory elements can be important for describing the binding
-characteristics of any given transcription factor.
-We have already defined the association of the merged windows with annotated 
-regions, and we can easily visualise these using `plotPie()`.
+Similar to the features track, where the names of `GRangesList` elements denote
+the different feature types, able to then assigned a colour, coverage annotation
+tracks follow these same rules.
+For each coverage track being annotated, a `GRangesList` object can denote the
+ranges which can be assigned different colours.
 
-```{r plot-basic-pie, eval=FALSE}
-results_gr %>% 
-  plotPie(fill = "bestRegion")
+```{r cov-annot}
+cov_annot <- splitAsList(tmm_results, tmm_results$status) %>% 
+  endoapply(granges) %>% 
+  keepStandardChromosomes()
+cov_annot <- list(H3K27ac = cov_annot)
 ```
 
-However, given the default plots can often be slightly unsatisfactory, 
-`plotPie()` is heavily customisable, in particular taking advantage of the 
-`glue` syntax to customise labels.
+In the above, we have Unchanged and Decreased signal denoted as annotations.
+In keeping with the approach of having a matching list element for every 
+coverage track, we would need to pass this as a list which matched the 
+coverage track
 
-```{r plot-pie, fig.width=8, fig.height=6, fig.cap = "*Pie chart showing the best overlapping region for each merged windows. The best overlap is determined simply by the region with the lergest amount of overlap.*"}
-results_gr %>% 
-  plotPie(
-    fill = "bestRegion", min_p = 0.05, total_size = 5,
-    cat_alpha = 0.5,
-    cat_glue = "{str_wrap(bestRegion, 10)}\n{n}\n{percent(p, 0.1)}"
-  )
+```{r plot-hfgc-with-annot, fig.cap = "*The addition of an annotation track for the coverage tracks shows which regions were retained during the analysis, as well as those which were considered as showing changed or unchanged signal.*"}
+plotHFGC(
+  gr, cytobands = grch37.cytobands, 
+  features = regions, featcol = region_colours, featstack = "dense",
+  coverage =  cov_list, linecol = cov_colour,
+  genes = gene_models, genecol = "wheat", collapseTranscripts = FALSE,
+  zoom = 350, shift = -1e5,
+  rotation.title = 90, covsize = 10, genesize = 1, featsize = 5,
+  annotation = cov_annot, annotcol = status_colours[c("Unchanged", "Increased")]
+)
 ```
 
-We can also scale by additional columns.
-Here, we'll find the proportion of each window which overlaps each type of 
-region, providing a complete summary of the proportion of our ranges which 
-overlaps each feature.
+Plots are able to be tweaked considerably further via multiple parameters, 
+however these basic approaches cover the core functionality of `plotHFCG()`
+for enabling simple & reproducible plotting across regions for multiple sites
+within a larger experiment.
 
-```{r plot-pie-width, fig.width=8, fig.height=6, fig.cap = "*Pie chart with regions scaled by width to show the proportions of the total regions which overlap each type of annotated region.*"}
-regions %>% 
-  lapply(function(x) propOverlap(results_gr, x)) %>% 
-  as_tibble() %>% 
-  mutate(range = as.character(results_gr)) %>% 
-  pivot_longer(cols = names(regions), names_to = "region", values_to = "p") %>% 
-  dplyr::filter(p > 0) %>% 
-  mutate(
-    region = fct(region_levels[region], levels = region_levels),
-    w = p * width(GRanges(range)) / 1e3
-  ) %>% 
-  plotPie(
-    scale_by = "w", fill = "region", min_p = 0.05,
-    total_glue = "{round(N, 1)}kb", total_size = 5,
-    cat_glue = "{str_wrap(region, 10)}\n{percent(p, 0.1)}",
-    cat_alpha = 0.5, cat_size = 4
-  )
-```
+#### Adding HiC Interactions
 
-These results can be extended further using `plotSplitDonut()` to show more 
-complex results.
-
-```{r plot-basic-donut, eval = FALSE}
-results_gr %>% 
-  plotSplitDonut(inner = "status", outer = "bestRegion")
-```
+If long-range interactions are available, these can also be provided as a 
+GenomicInteractions object, completing all available options for the HFGC 
+components.
 
 
-Again, this plot is heavily customisable, and is able to utilise separate
-palettes for the inner and outer rings if preferred.
-Specific slices can also be *exploded* for emphasis.
-
-```{r plot-split-donut, fig.cap = "*Summary of regions with changed signal and the annotated region with the largest overlap*"}
-region_col <- hcl.colors(length(region_levels), "Viridis", rev = TRUE)
-results_gr %>% 
-  subset(status != "Unchanged") %>% 
-  plotSplitDonut(
-    inner = "status", outer = "bestRegion", min_p = 0.01,
-    inner_palette = c("#3333E6", "#E6334D"),
-    outer_palette = region_col,
-    inner_glue = "H3K27ac\n{status}\n{n}", inner_label_alpha = 0.8,
-    outer_glue = "{str_wrap(bestRegion, 10)}\n{n}", outer_label = "text",
-    explode_outer = "Promoter", explode_r = 0.2
-  ) 
+```{r turn-off}
+knitr::opts_chunk$set(eval = FALSE)
 ```
 
 
 
-## Profile Heatmaps
+### Profile Heatmaps
 
 A very common approach to visualising the results of altered TF binding is to 
 plot *profile heatmaps* centred around the window (or peak), and extending out 
@@ -1003,29 +1198,6 @@ Once again, our reduced dataset makes this trivial, but the process may require
 significant computation resources if being performed on a complete dataset.
 In the following, we'll create the BigWig files an immediately create our 
 `BigWigFileList`.
-
-```{r make-bwfl}
-sbp <- ScanBamParam(which = GRanges("chr10:40000000-100000000"))
-## Sum the coverage across all Vehicle samples then create a merged BigWig
-cov_veh <- names(bfl) %>% 
-  str_subset("Veh") %>% 
-  lapply(function(x) coverage(bfl[[x]], param = sbp)$chr10) %>% 
-  RleList() %>% 
-  unlist()
-cov_veh <- GRanges(RleList(chr10 = cov_veh))
-export(cov_veh, "data/Veh_merged.bw")
-## Repeat for DHT
-cov_dht <- names(bfl) %>% 
-  str_subset("DHT") %>% 
-    lapply(function(x) coverage(bfl[[x]], param = sbp)$chr10) %>% 
-  RleList() %>% 
-  unlist()
-cov_dht <- GRanges(RleList(chr10 = cov_dht))
-export(cov_dht, "data/DHT_merged.bw")
-bwfl <- BigWigFileList(
-  list(Veh = "data/Veh_merged.bw", DHT = "data/DHT_merged.bw")
-)
-```
 
 Now we have our `BigWigFileList` we can define the ranges to plot along with the
 profile data.
@@ -1083,7 +1255,7 @@ Here, we've also just plotted raw counts.
 `macs2` is able to produce BigWigFiles containing logCPM values, or enrichment 
 over input and these are often used in preference to raw counts.
 
-## Inspection of Ranges
+### Inspection of Ranges
 
 Another important step in the analysis of ChIP-Seq data is to look at the 
 binding patterns using coverage, and inspect these in reference to genes and any 
@@ -1114,117 +1286,13 @@ gr <- results_gr %>%
 plotHFGC(gr, cytobands = grch37.cytobands)
 ```
 
-### Including Coverage
 
-In order to show our changed signal in context we can show the coverage using a
-`BigWigFileList` as for the Profile Heatmap.
-If providing a `BigWigFileList`, separate tracks will drawn for each element of 
-the object.
-In more complex scenarios where multiple targets are required a list of 
-`BigWigFileList`s can be provided and each element will then be drawn as a track 
-with overlapping coverage within each BigWigFileList.
-Colours need to be provided in the identical structure to match the provided 
-object.
-Here, we've provided a single `BigWigFileList` so we can provide a simple list 
-matching the names within the `BigWigFileList.`
-
-```{r plot-hfgc-coverge, fig.height=6, fig.cap = "*Coverage for the region of interest, shown with a blue highlight. Note how the counts are lower in the highlighted region for the merged Veh coverage track.*"}
-plotHFGC(
-  gr, cytobands = grch37.cytobands, 
-  coverage = bwfl, linecol = list("Veh" = "grey30", "DHT" = "darkred"),
-  zoom = 30
-)
-```
-
-
-### Displaying Genes
-
-Next we might like to add gene models to provide the regulatory context.
-These are supplied here in the layout required by the defaults of the 
-`GeneRegionTrack()` function, with all exons and transcripts annotated.
-
-```{r add-genes, fig.cap = "*Coverage for our region showing the relationship of signal to annotated genes*"}
-gene_models <- read_rds("data/chr10_trans_subset.rds")
-plotHFGC(
-  gr, cytobands = grch37.cytobands, 
-  coverage = bwfl, linecol = list("Veh" = "grey30", "DHT" = "darkred"),
-  genes = gene_models, genecol = "wheat",
-  zoom = 30
-)
-```
-
-### Adding Features
-
-Another useful track to add might be some key features such as promoters and 
-other annotated regions.
-Features must **always** be a `GRangesList`, with each element defining a 
-different type of feature, as we already have in our `regions_gr` object.
-
-```{r plot-hfgc, fig.cap = "*The same figure as previously, but with annotated regions added as features. Any type of feature can be added here.*"}
-region_grl <- splitAsList(regions_gr, regions_gr$region)[region_levels]
-names(region_col) <- region_levels
-plotHFGC(
-  gr, cytobands = grch37.cytobands, 
-  features = region_grl, featcol = region_col, featstack = "dense",
-  coverage = bwfl, linecol = list("Veh" = "grey30", "DHT" = "darkred"),
-  genes = gene_models, gene_col = "wheat",
-  zoom = 30
-)
-```
-
-
-### Adding HiC Interactions
-
-If long-range interactions are available, these can also be provided as a 
-GenomicInteractions object, completing all available options for the HFGC 
-components.
-
-### Adding Annotations To Coverage
-
-An indication of which regions are associated with increased or decreased 
-ChIP signal can also be a useful annotation to add to plots such as the above.
-Although we technically performed no statistical testing, let's consider a
-window with logFC below -1 to be showing decreased signal.
-
-Similar to the features track, where the names of `GRangesList` elements denote
-the different feature types, able to then assigned a colour, coverage annotation
-tracks follow these same rules.
-For each coverage track being annotated, a `GRangesList` object can denote the
-ranges which can be assigned different colours.
-
-```{r cov-annot}
-cov_annot <- splitAsList(results_gr, results_gr$status) %>% 
-  endoapply(granges)
-```
-
-In the above, we have Unchanged and Decreased signal denoted as annotations.
-In keeping with the approach of having a matching list element for every 
-coverage track, we would need to pass this as a list which matched the 
-coverage track
-
-```{r plot-annot, fig.cap = "*The addition of an annotation track for the coverage tracks shows which regions were retained during the analysis, as well as those which were considered as showing changed or unchanged signal.*"}
-plotHFGC(
-  gr, 
-  features = region_grl, featcol = region_col, featstack = "dense",
-  genes = gene_models, genecol = "wheat",
-  coverage = bwfl, linecol = list("Veh" = "grey30", "DHT" = "darkred"),
-  annotation = cov_annot, 
-  annotcol = c(Unchanged = "grey", Decreased = "#3333E6", Increased = "#E6334D"),
-  cytobands = grch37.cytobands, zoom = 30
-)
-```
-
-Plots are able to be tweaked considerably further via multiple parameters, 
-however these basic approaches cover the core functionality of `plotHFCG()`
-for enabling simple & reproducible plotting across regions for multiple sites
-within a larger experiment.
-
-# References
+## References
 
 <div id="refs"></div>
 <br>
 
-# Session Info
+## Session Info
 
 ```{r session-info}
 sessionInfo()
