@@ -111,7 +111,7 @@ Preprocessing was performed using the
 [`prepareChIPs`](https://github.com/smped/prepareChIPs) workflow, written in 
 snakemake [@Molder2021-mo] and all code is available at 
 https://github.com/smped/PRJNA509779.
-H3K27ac signal was obtained under basseline (E2) and DHT-treated (E2DHT) 
+H3K27ac signal was obtained under baseline (E2) and DHT-treated (E2DHT) 
 conditions, with alignments being to GRCh37.
 For this workflow, data has been subset to a region found on chromosome 10
 for simplicity.
@@ -189,7 +189,7 @@ First we can define our windows and count the alignments using the existing
 capabilities and functions provided in the `csaw` package.
 In the following, we'll use a sliding window of 120bp and a step size of 40bp,
 meaning each nucleotide is covered by 3 windows.
-In addition, we'll exclude blacklisted and greylisted regions as provided in the
+In addition, we'll exclude blacklisted and grey-listed regions as provided in the
 dataset.
 These can be obtained easily by using the `GreyListChIP` package, which is 
 beyond the scope of this vignette, however, code for preparing the GreyList` is
@@ -253,7 +253,7 @@ binding, where long stretches are unbound.
 The windows with higher counts tend to be associated with the samples targeting
 a transcription factor (TF), as seen in the two treatment group samples.
 
-```{r plot-densities, fig.cap = "*Read Densities for all returned windows across all samples*"}
+```{r plot-densities, fig.cap = "*Read Densities for the complete set of sliding windows across all samples*"}
 plotAssayDensities(wincounts, colour = "treatment", trans = "log1p") +
   theme_bw() +
   scale_colour_manual(values = treat_colours)
@@ -314,7 +314,7 @@ assays(filtcounts)
 We can once again check our signal distributions, this time on the logCPM 
 values.
 
-```{r plotcpm, fig.cap = "*Densities for logCPM values across all samples after discarding windows less likely to contain H3K27ac signal*"}
+```{r plotcpm, fig.cap = "*Densities for logCPM values across all samples after discarding windows less likely to contain H3K27ac signal using `dualFilter()`*"}
 plotAssayDensities(filtcounts, assay = "logCPM", colour = "treatment") +
   scale_colour_manual(values = treat_colours) +
   theme_bw()
@@ -326,7 +326,6 @@ consensus peaks.
 
 ```{r filt-ranges}
 rowRanges(filtcounts)
-mean(rowRanges(filtcounts)$overlaps_ref)
 ```
 
 ### Initial Visualisation
@@ -341,7 +340,7 @@ given ChIP target.
 Here, however, there is minimal difference between the two approaches as H3K27ac 
 signal tends to be broadly consistent between these treatment groups.
 
-```{r plot-assay-rle, fig.height=7, fig.cap = "*RLE plots across all samples (A) and with values calculated within treatment groups (B).*"}
+```{r plot-assay-rle, fig.height=7, fig.cap = "*RLE plots (A) across all samples and (B) with values calculated within treatment groups.*"}
 a <- plotAssayRle(filtcounts, assay = "logCPM", fill = "treat") +
   geom_hline(yintercept = 0, linetype = 2, colour = "grey") +
   scale_fill_manual(values = treat_colours) +
@@ -375,11 +374,11 @@ Multiple methods are enabled in the package `extraChIPs` via the function
 normalisation strategies from external packages.
 The two basic strategies are 1) Quasi-Likelihood Fits [@Lund2012-xo] and 2) 
 `limma-trend` [@Law2014-xq].
-This first (method = "qlf") uses counts with any of the provided normalisation 
-strategies from `edgeR::calcNormFactors()`, and setting the normalisation 
-method to "none" is the equivalent of library-size normalisation, which 
-replicates the default normalisation strategy from DiffBind [@DiffBind2012].
-If choosing to normalise within treatment groups, a factor can be provided via 
+The first approach (method = "qlf") uses counts along with any of the 
+normalisation strategies from `edgeR::calcNormFactors()`, and setting the 
+normalisation method to "none" is the equivalent of library-size normalisation, 
+which replicates the default normalisation strategy from DiffBind [@DiffBind2012].
+If choosing to normalise *within treatment groups*, a factor can be provided via 
 the groups argument, essentially adding this as an option for all methods 
 provided in `edgeR::calcNormFactors()`.
 The second method (method = "lt") is specifically for logCPM values and these 
@@ -408,7 +407,7 @@ fit_gr <- fitAssayDiff(filtcounts, design = X, fc = 1.2, asRanges = TRUE)
 
 After an analysis has been performed, values contained in the output will
 be estimated signal (`logCPM`), estimated change (`logFC`) with both raw and 
-adjusted p-values.
+adjusted p-values for all sliding windows.
 Given the dependency of neighbouring windows, any adjusted p-values will not be
 appropriate and a merging of overlapping and/or neighbouring windows should be 
 performed.
@@ -426,12 +425,14 @@ A representative window, corresponding to the original window with the lowest
 p-value is returned.
 
 ```{r merge-by-hmp}
-results_gr <- mergeByHMP(fit_gr, inc_cols = "overlaps_ref", merge_within = 120)
-results_gr$status <- case_when(
-  results_gr$hmp_fdr > 0.05 ~ "Unchanged",
-  results_gr$logFC > 0 ~ "Increased",
-  results_gr$logFC < 0 ~ "Decreased"
-)
+results_gr <- mergeByHMP(fit_gr, inc_cols = "overlaps_ref", merge_within = 120) %>% 
+  mutate(
+    status <- case_when(
+      hmp_fdr > 0.05 ~ "Unchanged",
+      logFC > 0 ~ "Increased",
+      logFC < 0 ~ "Decreased"
+    )
+  )
 arrange(results_gr, hmp)[1:5]
 ```
 
@@ -444,7 +445,7 @@ complete set of sliding windows and the final set of merged windows.
 Any bias present in our data will be visible when using the sliding windows, 
 whilst our final results can be inspected using the merged windows.
 
-```{r plot-ma-libsize, fig.cap = "MA Plots using A) all sliding windows (after filtering) and B) the final set of merged windows. The most highly ranked merged window is also labelled in the set of merged windows. Blue lines represent a loess curve through the data."}
+```{r plot-ma-libsize, fig.cap = "MA Plots using A) all sliding windows (after filtering before merging) and B) the final set of merged windows. The most highly ranked merged window is also labelled in the set of merged windows. Blue lines represent a loess curve through the data."}
 A <- fit_gr %>% 
   as_tibble() %>% 
   ggplot(aes(logCPM, logFC)) +
@@ -455,7 +456,7 @@ A <- fit_gr %>%
     data = . %>% 
       summarise(
         n = dplyr::n(),
-        logCPM = max(logCPM) - 0.1 * diff(range(logCPM)),
+        logCPM = max(logCPM) - 0.15 * diff(range(logCPM)),
         logFC = max(logFC) - 0.05 * diff(range(logFC)),
         label = glue("{comma(n)}\nSliding Windows")
       )
@@ -478,7 +479,7 @@ B <- results_gr %>%
     data = . %>% 
       summarise(
         n = dplyr::n(),
-        logCPM = max(logCPM) - 0.1 * diff(range(logCPM)),
+        logCPM = max(logCPM) - 0.15 * diff(range(logCPM)),
         logFC = max(fit_gr$logFC) - 0.05 * diff(range(fit_gr$logFC)),
         label = glue("{comma(n)}\nMerged Windows")
       )
@@ -493,7 +494,6 @@ A particularly beneficial feature of this approach is that the final ranges
 will be of highly variable width, with this select region of chromosome 10 
 producing merged windows ranging from `r min(width(results_gr))`bp to 
 `r max(width(results_gr))/1e3`kb, as may be expected for H3K27ac signal.
-
 
 ```{r plot-width-logcpm, fig.cap="Larger windows tend to be associated with stronger signal. Merged windows which only include 4-5 sliding windows tend to be associated with low H3K27ac signal. Here one window showing changed binding is larger than 10kb and we have been able to detect change somewhere within this range."}
 results_gr %>%
@@ -514,7 +514,7 @@ Using Library Size normalisation, as above, is a conservative approach and other
 methods such as RLE [@DESeq22014] or TMM [@Robinson2010-qp] may be appropriate.
 However, these methods assume that signal distributions are drawn from the same 
 distributions across all samples, which unlike most RNA-Seq, is not always able 
-to be safely assumed.
+to be safely assumed for ChIP-Seq data.
 An example may be when an transcription factor is primarily cytoplasmic in one
 treatment group, before being translocated to the nucleus in another treatment.
 The Androgen Receptor (*AR*) is a common example of this behaviour.
@@ -534,23 +534,26 @@ qtest
 
 Here, no differences were evident across median values (ANOVA p = 
 `r round(anova(qtest)[["Pr(>F)"]][[1]], 3)`) or between distributions (p = 
-`r qtest@quantroPvalPerm`) and as such, TMM/RLE normalisation may be appropriate.
+`r qtest@quantroPvalPerm`) and as such, TMM/RLE normalisation across all 
+samples may be appropriate.
 
 #### TMM Normalisation
 
-To perform an analysis using TMM-normalisation, we can simply provide this to 
-`fitAssayDiff()`
+To perform an analysis using TMM-normalisation, we can simply specify this using 
+the argument `norm = "TMM"` when calling `fitAssayDiff()`
 
 ```{r fit-tmm}
 tmm_gr <- fitAssayDiff(
   filtcounts, design = X, fc = 1.2, norm = "TMM", asRanges = TRUE
 )
-tmm_results <- mergeByHMP(tmm_gr, inc_cols = "overlaps_ref", merge_within = 120)
-tmm_results$status <- case_when(
-  tmm_results$hmp_fdr > 0.05 ~ "Unchanged",
-  tmm_results$logFC < 0 ~ "Decreased",
-  tmm_results$logFC > 0 ~ "Increased"
-)
+tmm_results <- mergeByHMP(tmm_gr, inc_cols = "overlaps_ref", merge_within = 120) %>% 
+  mutate(
+    status = case_when(
+      hmp_fdr > 0.05 ~ "Unchanged",
+      logFC < 0 ~ "Decreased",
+      logFC > 0 ~ "Increased"
+    )
+  )
 table(tmm_results$status)
 ```
 
@@ -569,7 +572,7 @@ positives, so should only be used when compelling evidence exists and the
 underlying biology supports this.
 
 Checking MA-plots shows that the very slight negative bias in higher-signal 
-windows when using library size normalisation (seen above) was lessened after 
+windows when using library size normalisation, as seen above, was lessened after 
 TMM normalisation.
 
 ```{r plot-ma-tmm, fig.cap = "MA plot for all sliding windows using TMM normalisation. The blue line corresponds to a loess curve fitted through the points."}
@@ -610,7 +613,7 @@ sliding windows.
 For our data, minimal bias is evident, with a possible, but slight, downwards 
 bias in the low-GC windows when using Library-Size normalisation only.
 
-```{r gc-bias, fig.cap = "GC-Content Vs estiamted logFC when using A) library-size normalisation and B) TMM normalisation"}
+```{r gc-bias, fig.cap = "GC-Content Vs estimated logFC when using A) library-size normalisation and B) TMM normalisation"}
 A <- fit_gr %>% 
   mutate(gc = gc[,1]) %>% 
   as_tibble() %>% 
@@ -651,7 +654,7 @@ cqnplot(
 
 We can check the impact of normalisation using PCA.
 
-```{r plot-cqn-pca, fig.cap="PCA plot of CQ-Normalised logCPM values"}
+```{r plot-cqn-pca, fig.cap = "PCA plot of CQ-Normalised logCPM values"}
 plotAssayPCA(
   filtcounts, assay = "norm_logCPM", colour = "treatment", label = "accession"
 ) +
@@ -672,12 +675,12 @@ cqn_results <- mergeByHMP(cqn_gr, inc_cols = "overlaps_ref", merge_within = 120)
 
 This approach has returned fewer results, with only `r sum(cqn_results$hmp_fdr < 0.05)` 
 merged windows being considered significant, when accounting for GC-bias, 
-however this is likely to reflect a more accurate results, particularly if 
-setting `fc = 0` as a less stringent hypothesis test.
+however this is likely to reflect a more accurate set of results, particularly 
+if setting `fc = 0` as a less stringent hypothesis test.
 
 Again we can check for bias using an MA plot, along with the GC-bias plot
 
-```{r plot-bias-cqn, fig.cap = "QC plots for results using CQN, including an A) MA-plot and B) GC-bias plot. The minimal bias oberserved prevously for low-GC regions appears to have been rectified, however, higher GC regions appear less satisfactory."}
+```{r plot-bias-cqn, fig.cap = "QC plots for results using CQN, including an A) MA-plot and B) GC-bias plot. The minimal bias oberserved previously for low-GC regions appears to have been rectified, however, higher GC regions appear less satisfactory in this dataset."}
 A <- cqn_gr %>% 
   as_tibble() %>% 
   ggplot(aes(logCPM, logFC)) +
@@ -698,7 +701,7 @@ A + B + plot_annotation(tag_levels = "A")
 Results can be compared to any of the previous approaches, and it appears that 
 using CQN has led to slightly more conservative estimates of fold-change.
 
-```{r compare-logfc-tmm-cqn, fig.cap = "Comparison of logFC estimates obtained using TMM and CQ normalisation. The black lin represents y = x, whilst the regression line is shown in blue. A slight downwards bias was evident in CQN derived estimates."}
+```{r compare-logfc-tmm-cqn, fig.cap = "Comparison of logFC estimates obtained using TMM and CQ normalisation. The black line represents y = x, whilst the regression line is shown in blue. A slight downwards bias was evident in CQN-derived estimates."}
 tibble(TMM = tmm_gr$logFC, CQN = cqn_gr$logFC) %>% 
   ggplot(aes(TMM, CQN)) +
   geom_point(alpha = 0.6) +
@@ -752,11 +755,11 @@ By default, this is by direct promoter/gene overlap (`prom2gene = 0`)
 distance specified by `enh2gene` (default = 100kb)
 4. **Check for genes with no previous mappings**
     + Peaks *with no previous mappings* are assigned to all directly overlapping 
-genes, or the nearest gene within a specified distance 
+genes, or the *nearest* gene within a specified distance 
 (default `gr2gene` = 100kb)
 
 If no promoters, enhancers or long-range interactions are supplied, all genes 
-will be mapped to peaks using step 4.
+will be simply mapped to ChIP-Seq regions using step 4.
 
 A GTF of annotations can be used, with the following being the genes, 
 transcripts and exons from chr10, taken from [Gencode v43](https://www.gencodegenes.org/human/release_43lift37.html).
@@ -795,31 +798,7 @@ along with two more unique to specific transcripts.
 subset(tss, vapply(gene_name, function(x) "PPIF" %in% x, logical(1)))
 ```
 
-Now we can check our distribution of regions in reference to TSS sites
-
-```{r plot-dist-to-tss, fig.cap = "Distance to nearest TSS shown as percentiles, with the percentage of regions directly overlapping a TSS shown on the figure."}
-tmm_results %>% 
-  distanceToNearest(tss) %>% 
-  as_tibble() %>% 
-  arrange(distance) %>% 
-  mutate(p = seq_along(distance) / nrow(.)) %>% 
-  dplyr::filter(distance < 1e5) %>% 
-  ggplot(aes(distance / 1e3, p)) +
-  geom_line() +
-  geom_label_repel(
-    aes(label = label), 
-    data = . %>% 
-      dplyr::filter(distance == 0) %>% 
-      dplyr::filter(p == max(p)) %>% 
-      mutate(label = glue("{percent(p)} TSS\nOverlap")),
-    alpha =  0.7
-  ) +
-  scale_x_continuous(name = "Distance to Nearest TSS (kb)", breaks = seq(0, 1, by = 0.2)*100) +
-  scale_y_continuous(labels = percent, name = "Percentile") 
-```
-
 We can also add the TSS overlap status to our set of results
-
 
 ```{r add-tss}
 tmm_results$tss <- overlapsAny(tmm_results, tss)
@@ -830,8 +809,8 @@ Next we'll want to map our regions to genes.
 To use the methods available in `mapByFeature()` let's define a set of promoters.
 First we'll create a promoter for each transcript, then we can merge any 
 overlapping promoters using `reduceMC()`.
-Setting `simplify = FALSE` avoids an issue in this subset of genes where one 
-gene has multiple IDs, and helps retain a 1:1 mapping between IDs and genes.
+(Setting `simplify = FALSE` avoids an issue in this subset of genes where one 
+gene has multiple IDs, and helps retain a 1:1 mapping between IDs and genes.)
 Importantly, this will give a set of promoters which are unique and 
 non-overlapping but with variable width and with the complete set of transcripts 
 that may be regulated by the promoter listed.
@@ -855,9 +834,11 @@ tmm_results %>% filter(hmp_fdr < 0.05) %>% arrange(hmp)
 
 So now we have our regions showing differential signal, along with which gene 
 they are most likely to be impacting, and whether they directly overlap the TSS.
+This can all be summarised into a single MA-plot for presentation of final 
+results.
 
 
-```{r plot-ma-mapped, fig.cap = "MA-plot with the top 20 regions by significance labelled according to the most likely gene. Regions which directly overlap a TSS are shown as empty circles"}
+```{r plot-ma-mapped, fig.cap = "MA-plot with the top 20 regions by significance labelled according to the most likely gene influenced by the detected signal. Regions which directly overlap a TSS are shown as empty circles"}
 status_colours <- c(Unchanged = "grey70", Increased = "red3", Decreased = "royalblue")
 tmm_results %>% 
   as_tibble() %>% 
@@ -887,7 +868,8 @@ signal, knowing which type of regulatory region signal was observed in is
 another question commonly asked of ChIP-Seq data.
 We've already defined our promoters, so let's keep using `reduceMC()` along 
 with `setdiffMC()` to define unique *upstream promoter*, *exon*, *intron* and 
-*intergenic* regions.
+*intergenic* regions in a hierarchical manner such that each nucleotide only 
+belongs to one type of region.
 
 First we'll shift our start sites upstream by 2.5kb, then we can extend another 
 2.5kb to define regions 5kb upstream from a TSS.
@@ -961,7 +943,7 @@ creating the plot.
 External formatting functions such as `comma()`, `percent()` or `str_to_title()` 
 can also be put to good use here.
 
-```{r plot-pie-labels, fig.cap = "Pie chart showing customised labels. Here the regions have been modified to use Title case in the labels, but without modifying the underlying data."}
+```{r plot-pie-labels, fig.cap = "Pie chart showing customised labels. Here the regions have been modified to use title case in the labels, but without modifying the underlying data."}
 plotPie(
   tmm_results, fill = "bestOverlap",
   cat_glue = "{str_to_title(.data[[fill]])}\n{comma(n, 1)}\n({percent(p, 0.1)})"
@@ -1022,12 +1004,18 @@ plotSplitDonut(
 ### Coverage Plots
 
 In order to show our changed signal in context we can show the coverage using a
-`BigWigFileList` and the function `plotHFGC()`
-If providing a `BigWigFileList`, separate tracks will drawn for each element of 
-the object.
-In more complex scenarios where multiple targets are required a list of 
-`BigWigFileList`s can be provided and each element will then be drawn as a track 
-with overlapping coverage within each BigWigFileList.
+`BigWigFileList` and the function `plotHFGC()`, which stands for plot **H**iC, 
+**F**eatures, **G**enes and **C**overage, with tracks appearing in that order.
+`plotHFGC()` wraps multiple calls to the package `Gviz` [@gviz] to simplify 
+repetitive plot generation but retain significant flexibility.
+All tracks are options, with the minimal requirements being cytogenetic bands 
+along with a specified GenomicRange.
+However, this does restrict plotting to the "Standard Chromosomes".
+
+Coverage is produced using BigWig Files, passed to `plotHFGC()` as either a 
+`BigWigFileList` (for separate tracks) or a list of `BigWigFileList` objects,
+for multiple tracks with individual samples overlaid.
+
 
 ```{r create-bwfl}
 bwfl <- here::here(
@@ -1037,16 +1025,19 @@ bwfl <- here::here(
   setNames(levels(samples$treatment))
 ```
 
-We can also include cytogenetic bands for these coverage plots, which are 
-provided with `extraChIPs`
+We can also include cytogenetic bands for these coverage plots, some of which 
+are provided with `extraChIPs`.
 
 ```{r load-cytobands}
 data("grch37.cytobands")
 head(grch37.cytobands)
 ```
 
-Let's check the coverage across out most highly-ranked region with default 
+Let's check the coverage across the most highly-ranked region with default 
 settings.
+By default, the specified range will be outlined (i.e. highlighted) with a 
+blue rectangle which is able to be turned off and customised as the user sees 
+fit.
 
 
 ```{r plot-hfgc-init, fig.cap = "Generic figure from plotHFGC showing coverage for the selected region only"}
@@ -1098,19 +1089,11 @@ plotHFGC(
 
 #### Adding Features
 
-#### Mapping of Windows to Regions
-
-If we also have a set of annotated regions, we can easily map our regions to 
-the region that it has the greatest proportion of overlap.
-First, we'll arrange our regions to be a single `GRanges` object with the column
-"region".
-From these we cn simply add the column `bestRegion`
-
-
 Another useful track to add might be some key features such as promoters and 
-other annotated regions.
+other annotated regions, as we have formd earlier in the workflow.
 Features must **always** be a `GRangesList`, with each element defining a 
 different type of feature, as we already have in our `regions_gr` object.
+For multiple feature tracks, a list of `GRangesList` objects can be passed.
 
 ```{r plot-hfgc-with-regions, fig.cap = "*The same figure as previously, but with annotated regions added as features. Any type of feature can be added here.*"}
 regions <- keepStandardChromosomes(regions)
@@ -1128,14 +1111,18 @@ plotHFGC(
 
 An indication of which regions are associated with increased or decreased 
 ChIP signal can also be a useful annotation to add to plots such as the above.
-Although we technically performed no statistical testing, let's consider a
-window with logFC below -1 to be showing decreased signal.
+Using the status from our differential signal testing, we can create a 
+`GRangesList` with te various regions annotated as Increased, Unchanged etc,
 
 Similar to the features track, where the names of `GRangesList` elements denote
 the different feature types, able to then assigned a colour, coverage annotation
 tracks follow these same rules.
 For each coverage track being annotated, a `GRangesList` object can denote the
 ranges which can be assigned different colours.
+Annotation tracks should be passed to `plotHFGC()` using the same structure as
+the coverage tracks, so here if we pass the annotations as a list with the 
+single element `H3K27ac` these annotations will be added directly above the 
+coverage track for H3K27ac signal.
 
 ```{r cov-annot}
 cov_annot <- splitAsList(tmm_results, tmm_results$status) %>% 
@@ -1144,10 +1131,15 @@ cov_annot <- splitAsList(tmm_results, tmm_results$status) %>%
 cov_annot <- list(H3K27ac = cov_annot)
 ```
 
-In the above, we have Unchanged and Decreased signal denoted as annotations.
-In keeping with the approach of having a matching list element for every 
-coverage track, we would need to pass this as a list which matched the 
-coverage track
+In our final plot, we'll zoom out to the entire region covered by *KAT6B*, 
+showing all transcripts, with out original region highlighted in blue.
+All merged windows for which a differential signal test was performed will be
+annotated with colours indicating the result for that window.
+As can be seen multiple H3K27ac signal regions appear to be responding to DHT 
+treatment for *KAT6B*  with a possible intronic enhancer and alternative 
+promoter being most likely impacted, including the neghbouring region to our 
+initial range.
+In contradst, the primary promoter appears unaffected by DHT treatment.
 
 ```{r plot-hfgc-with-annot, fig.cap = "*The addition of an annotation track for the coverage tracks shows which regions were retained during the analysis, as well as those which were considered as showing changed or unchanged signal.*"}
 plotHFGC(
@@ -1162,129 +1154,13 @@ plotHFGC(
 ```
 
 Plots are able to be tweaked considerably further via multiple parameters, 
-however these basic approaches cover the core functionality of `plotHFCG()`
+however these basic approaches cover the core functionality of `plotHFGC()`
 for enabling simple & reproducible plotting across regions for multiple sites
 within a larger experiment.
-
-#### Adding HiC Interactions
 
 If long-range interactions are available, these can also be provided as a 
 GenomicInteractions object, completing all available options for the HFGC 
 components.
-
-
-```{r turn-off}
-knitr::opts_chunk$set(eval = FALSE)
-```
-
-
-
-### Profile Heatmaps
-
-A very common approach to visualising the results of altered TF binding is to 
-plot *profile heatmaps* centred around the window (or peak), and extending out 
-a given number of of bases.
-The data required for this is referred to in `extraChIPs` as profile data, and
-given that extracting this from a set of `BigWigFile`s can be time consuming,
-this step is performed prior to the actual plotting, so that ranges can be added
-or excluded as desired.
-
-First we need to define a `BigWigFileList` as these are conventionally very 
-large files which shouldn't be retained in memory, but are just accessed to
-import the key regions for a particular process.
-Typically, these can be generated during peak calling but they can also be 
-created directly from `bam` files if needed.
-Once again, our reduced dataset makes this trivial, but the process may require 
-significant computation resources if being performed on a complete dataset.
-In the following, we'll create the BigWig files an immediately create our 
-`BigWigFileList`.
-
-Now we have our `BigWigFileList` we can define the ranges to plot along with the
-profile data.
-In order to find the region within each range with the maximal signal, we'll 
-compare back to the original results before windows were merged, then return 
-the original window with the maximal signal (i.e. logCPM).
-Note that we already had the windows in "keyval_range" which corresponded to 
-the ranges with the most statistically significant change.
-Realistically we can choose any strategy for centring ranges that we wish.
-
-```{r get-max-ranges}
-gr_increase <- subset(results_gr, status == "Increased")
-max_peaks <- gr_increase %>%
-  granges() %>%
-  join_overlap_left(
-    mutate(fit_gr, window = as.character(fit_gr))
-  ) %>% 
-    arrange(1/logCPM) %>% 
-    distinctMC(.keep_all = TRUE) %>% 
-    colToRanges("window") %>% 
-    granges()
-```
-
-Now we've found the original windows with the strongest signal, we can define 
-the profile data using the surrounding regions.
-Our widest region with significant change in signal is 
-`r max(width(subset(results_gr, status == "Increased")))`bp, so let's set our 
-profiles to be created stretching 10kb either side of the peak centre.
-
-```{r get-profile}
-pd <- getProfileData(bwfl, max_peaks, upstream = 1e4, log = FALSE)
-pd
-```
-
-This produces a `GRangesList` with a `GRanges` element for every file in the 
-`BigWigFileList`, which has the profile data stored in the final column.
-Each element of these columns is a `DataFrame` with the region broken into a 
-defined number of bins, and an average coverage value calculated.
-We can then simply plot this data by specifying this column in the function
-`plotProfileHeatmap()`, which produces a `ggplot2` object able to be 
-customised in the conventional manner.
-Here, we'll add a colour scale and `theme_bw()`
-
-```{r profile-heatmap, fig.cap = "*Profile Heatmap of the regions on chromosome 10 showing evidence for increased H3K27ac signal. Regions are centred at the point of maximal signal.*"}
-plotProfileHeatmap(pd, "profile_data") +
-  scale_fill_gradient(low = "white", high = "red") +
-  labs(fill = "Counts") +
-  theme_bw()
-```
-
-Note that H3K27ac often contains regions with significantly lower signal where 
-the transcriptional machinery is instead occupying the DNA and as such, H3K27ac 
-peaks are often centred using peaks from an additional transcription factor.
-Here, we've also just plotted raw counts.
-`macs2` is able to produce BigWigFiles containing logCPM values, or enrichment 
-over input and these are often used in preference to raw counts.
-
-### Inspection of Ranges
-
-Another important step in the analysis of ChIP-Seq data is to look at the 
-binding patterns using coverage, and inspect these in reference to genes and any 
-other feature of interest.
-The function `plotHFGC()` provides a simple, standardised layout using the
-visualisation tools from `Gviz`.
-If supplied, tracks will be drawn in the order 1) HiC; 2) Features; 3) Genes, 
-and 4) Coverage.
-All tracks are optional, and if none are provided a simply cytogenetic plot will
-be produced.
-Whilst a simple and intuitive function to use, it also provides a great deal of 
-flexibility for advanced customisation.
-All plots require a `GRanges` object to define the plotting region along with a 
-set of cytogenetic bands.
-These are provided in the package for GRCh37 and GRCh38.
-
-
-Let's start by plotting the first promoter showing changed signal in 
-`results_gr` using the minimal data possible.
-This is a `GRanges` object and some cytogenetic bands.
-
-```{r plot-empty-hfgc, fig.height=6, fig.cap = "*Basic output from plotHFGC without any of the optional tracks*"}
-data("grch37.cytobands")
-gr <- results_gr %>%
-  subset(hmp_fdr < 0.05) %>% 
-  subset(vapply(gene_name, function(x) "PRXL2A" %in% x, logical(1))) %>% 
-  subset(logCPM == max(logCPM))
-plotHFGC(gr, cytobands = grch37.cytobands)
-```
 
 
 ## References
