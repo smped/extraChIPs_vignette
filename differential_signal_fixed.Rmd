@@ -56,7 +56,7 @@ if (!"BiocManager" %in% rownames(installed.packages()))
   install.packages("BiocManager")
 pkg <- c(
   "tidyverse", "Rsamtools", "csaw", "BiocParallel", "rtracklayer", "edgeR", 
-  "patchwork", "extraChIPs", "plyranges", "scales", "ggside"
+  "patchwork", "extraChIPs", "plyranges", "scales", "here"
 )
 BiocManager::install(pkg, update = FALSE)
 ```
@@ -74,11 +74,9 @@ library(patchwork)
 library(extraChIPs)
 library(plyranges)
 library(scales)
-library(ggside)
-library(cqn)
-library(quantro)
 library(glue)
 library(ggrepel)
+library(here)
 theme_set(theme_bw())
 ```
 
@@ -98,23 +96,27 @@ are included in this dataset for simplicity.
 `Seqinfo` objects are the foundation of working with GRanges, so let's define a
 suitable object for consistency throughout th analysis.
 
-```{r set-seqinfo}
-hg19 <- GenomeInfoDb::getChromInfoFromUCSC("hg19")
-sq <- hg19 %>% 
-  dplyr::filter(chrom %in% paste0("chr", c(1:22, "X", "Y"))) %>% 
-  mutate(genome = "hg19") %>% 
-  dplyr::select(
-    seqnames = chrom, seqlengths = size, isCircular = circular, genome
-  ) %>% 
-  as("Seqinfo")
-```
 
-```{r}
-samples <- read_tsv(here::here("data/ER/samples.tsv")) %>% 
+```{r load-samples}
+samples <- here("data", "PRJNA509779.tsv") %>% 
+  read_tsv() %>% 
+  dplyr::filter(target == "ER") %>% 
   mutate(treatment = factor(treatment, levels = c("E2", "E2DHT")))
 accessions <- samples %>% 
-  split(.$treatment) %>% 
+  split(f = .$treatment) %>% 
   lapply(pull, "accession")
+treat_colours <- c("steelblue", "red3", "grey")
+names(treat_colours) <- c(levels(samples$treatment), "Input")
+```
+
+```{r bfl}
+bfl <- here("data", "ER", glue("{samples$accession}.bam")) %>% 
+  BamFileList() %>% 
+  setNames(str_remove_all(names(.), ".bam"))
+file.exists(path(bfl))
+sq <- seqinfo(bfl)
+isCircular(sq) <- rep(FALSE, length(seqlevels(sq)))
+genome(sq) <- "GRCh37"
 ```
 
 
@@ -125,7 +127,7 @@ The provided dataset includes six files produced by `macs2 callpeak`
 parsed using `extraChIPs`.
 
 ```{r load-peaks}
-peaks <- here::here("data", "ER", glue("{samples$accession}_peaks.narrowPeak")) %>% 
+peaks <- here("data", "ER", glue("{samples$accession}_peaks.narrowPeak")) %>% 
   importPeaks(seqinfo = sq)
 ```
 
@@ -140,7 +142,10 @@ names(peaks) <- str_remove_all(names(peaks), "_peaks.narrowPeak")
 Once loaded, we can easily check how similar our replicates are.
 
 ```{r plot-overlaps, fig.height=6, fig.cap = "*UpSet plot showing overlapping peaks across all replicates*"}
-plotOverlaps(peaks, min_size = 10, .sort_sets = FALSE)
+plotOverlaps(
+  peaks, min_size = 10, .sort_sets = FALSE, 
+  set_col = treat_colours[as.character(samples$treatment)]
+)
 ```
 
 Optionally, specifying a column and a suitable function will produce an 
@@ -150,7 +155,10 @@ peaks identified in only one or two replicates, the overall signal intensity is
 generally lower.
 
 ```{r plot-overlaps-score, fig.cap = "*UpSet plot showing overlapping peaks across all replicates, with the maximum score across all replicates shown in the upper panel.*"}
-plotOverlaps(peaks, min_size = 10, .sort_sets = FALSE, var = "score", f = "max")
+plotOverlaps(
+  peaks, min_size = 10, .sort_sets = FALSE, var = "score", f = "max",
+   set_col = treat_colours[as.character(samples$treatment)]
+)
 ```
 
 A common task at this point may be to define consensus peaks within each 
@@ -163,12 +171,12 @@ If we wish to retain any of the original columns, such as the `macs2 callpeak`
 score, we can simply pass the column names to `makeConsensus()`
 
 ```{r consensus-with-score}
-consensus_e2 <- peaks %>% 
-  .[accessions$E2] %>% 
-  makeConsensus(p = 2/3, var = "score")
-consensus_e2dht <- peaks %>% 
-  .[accessions$E2DHT] %>% 
-  makeConsensus(p = 2 / 3, var = "score")
+consensus_e2 <- makeConsensus(
+  peaks[accessions$E2], p = 2/3, var = "score"
+  )
+consensus_e2dht <- makeConsensus(
+  peaks[accessions$E2DHT], p = 2/3, var = "score"
+  )
 ```
 
 Alternatively, we could find the centre of the peaks as part of this process, 
@@ -177,13 +185,11 @@ Whilst this is very common for *transcription factor* peaks, this may be less
 informative for other types of ChIP targets, such as the histone marks we have.
 
 ```{r consensus-with-centre}
-consensus_e2 <- peaks %>% 
-  .[accessions$E2] %>% 
+consensus_e2 <- peaks[accessions$E2] %>% 
   endoapply(mutate, centre = start + peak) %>% 
   makeConsensus(p = 2/3, var = "centre") %>% 
   mutate(centre = vapply(centre, mean, numeric(1)))
-consensus_e2dht <- peaks %>% 
-  .[accessions$E2DHT] %>% 
+consensus_e2dht <- peaks[accessions$E2DHT] %>% 
   endoapply(mutate, centre = start + peak) %>% 
   makeConsensus(p = 2/3, var = "centre") %>% 
   mutate(centre = vapply(centre, mean, numeric(1)))
@@ -196,7 +202,7 @@ for the input.
 GRangesList(
   E2 = granges(consensus_e2), E2DHT = granges(consensus_e2dht)
 ) %>% 
-  plotOverlaps(set_col = c("grey70", "red"))
+  plotOverlaps(set_col = treat_colours[names(.)])
 ```
 
 We could go one step further and define the set of peaks found in either 
@@ -205,8 +211,8 @@ Given we're being inclusive here, we can leave p = 0 so any peak found in
 either treatment is included.
 
 ```{r all_consensus}
-greylist <- import.bed("data/chr10_greylist.bed", seqinfo = sq)
-blacklist <- import.bed("data/chr10_blacklist.bed", seqinfo = sq)
+greylist <- here("data/chr10_greylist.bed") %>% import.bed(seqinfo = sq)
+blacklist <- here("data/chr10_blacklist.bed") %>% import.bed(seqinfo = sq)
 union_peaks <- GRangesList(
   E2 = select(consensus_e2, centre), E2DHT = select(consensus_e2dht, centre)
 ) %>% 
@@ -215,8 +221,6 @@ union_peaks <- GRangesList(
   filter_by_non_overlaps(c(greylist, blacklist)) 
 ```
 
-H3K27ac peaks tend to be far more variable in width than those from transcription factors, and as such we'll choose fixed-windows which are wider than the DiffBind default of 500bp, extending to 800bp.
-This is just above the 30th percentile of widths in the provided set of peaks and may somewhat appropriate.
 
 ```{r}
 w <- 500
@@ -232,11 +236,7 @@ centred_peaks <- union_peaks %>%
 
 
 ```{r bfl}
-bfl <- here::here("data/ER", glue("{samples$accession}.bam")) %>% 
-  BamFileList()
-names(bfl) <- str_remove_all(names(bfl), ".bam")
 se <- regionCounts(bfl, centred_peaks, ext = 200)
-se <- se[rowSums(assay(se, "counts")) > 0]
 colData(se) <- colData(se) %>% 
   as_tibble(rownames = "accession") %>% 
   left_join(samples) %>% 
@@ -248,9 +248,12 @@ assay(se, "logCPM") <- cpm(assay(se, "counts"), lib.size = se$totals, log = TRUE
 ```
 
 ```{r}
-plotAssayDensities(se, assay = "logCPM", colour = "treat")
-plotAssayRle(se, assay = "logCPM", fill = "treat")
-plotAssayPCA(se, assay = "logCPM", colour = "treat", label = "sample")
+plotAssayDensities(se, assay = "logCPM", colour = "treat") +
+  scale_colour_manual(values = treat_colours)
+plotAssayRle(se, assay = "logCPM", fill = "treat") +
+  scale_fill_manual(values = treat_colours)
+plotAssayPCA(se, assay = "logCPM", colour = "treat", label = "sample") +
+  scale_colour_manual(values = treat_colours)
 ```
 
 
@@ -274,88 +277,129 @@ tmm_res %>%
   mutate(`FDR < 0.05` = FDR < 0.05) %>% 
   ggplot(aes(logCPM, logFC)) +
   geom_point(aes(colour = `FDR < 0.05`)) +
-  geom_smooth(se = FALSE) +
+  geom_smooth(method = "lm", se = FALSE) +
   geom_label_repel(
-    aes(label = union_range), colour = "red",
+    aes(label = union_peak), colour = "red",
     data = . %>% dplyr::filter(FDR < 0.05)
   ) +
   scale_colour_manual(values = c("black", "red"))
 ```
 
+
 ```{r}
-trans <- read_rds(here::here("data/chr10_trans_subset.rds"))
-genome(trans) <- genome(sq)
-regions <- read_rds(here::here("data/chr10_region_subset.rds"))
-regions <- lapply(
-  regions, 
-  function(x){
-    genome(x) <- genome(sq)
-    x
-  }
-)
-regions_gr <- regions %>% 
-  lapply(select, region) %>% 
-  GRangesList() %>% 
-  unlist() %>% 
-  sort() %>% 
-  setNames(NULL)
-region_levels <- vapply(regions, function(x) x$region[1], character(1))
-region_grl <- splitAsList(regions_gr, regions_gr$region)[region_levels]
-reg_col <- hcl.colors(length(region_levels), "Viridis", rev = TRUE)
-names(reg_col) <- region_levels
-gr <- tmm_res %>% 
-  arrange(-logFC) %>% 
-  .[1] %>% 
-  granges()
-  as_tibble() %>% 
-  dplyr::slice(1) %>% 
-  pull("union_peak") %>% 
-  GRanges(seqinfo = sq) %>% 
-  keepStandardChromosomes()
-bwfl <- here::here("data/ER", glue("{names(accessions)}_cov_chr10.bw")) %>% 
-  BigWigFileList() %>% 
-  setNames(names(accessions))
-data("grch37.cytobands")
-plotHFGC(
-  gr, genes = trans, 
-  features = region_grl, featcol = reg_col,
-  coverage = list(ER = bwfl), cytobands = grch37.cytobands,
-  zoom = 25, shift = 5e3
-)
+gencode <- here("data/gencode.v43lift37.chr10.annotation.gtf.gz") %>% 
+  import.gff() %>% 
+  filter_by_overlaps(GRanges("chr10:42354900-100000000")) %>% 
+  split(.$type)
+seqlevels(gencode) <- seqlevels(sq)
+seqinfo(gencode) <- sq
 ```
 
 
+```{r}
+tss <- gencode$transcript %>% 
+  resize(width = 1, fix = "start") %>% 
+  select(gene_id, ends_with("name")) %>% 
+  reduceMC(min.gapwidth = 0)
+promoters <- gencode$transcript %>% 
+    select(gene_id, ends_with("name")) %>% 
+    promoters(upstream = 2500, downstream = 500) %>% 
+    reduceMC(simplify = FALSE)
+```
 
 
-```{r cqn, eval = FALSE, echo = FALSE}
-## Move this entire chunk to the H3K27ac sliding windows
-library(BSgenome.Hsapiens.UCSC.hg19)
-gen <- BSgenome.Hsapiens.UCSC.hg19
-gc <- getSeq(gen, rowRanges(se)) %>% 
-  letterFrequency(letters = "GC", as.prob = TRUE)
-rowData(se)$gc <- as.numeric(gc)
-cqn <- cqn(
-  assay(se, "counts"), x = rowData(se)$gc, sizeFactors = colData(se)$totals, 
-  lengths = rep(w + 1, nrow(se)), lengthMethod = "fixed"
-)
-as_tibble(cqn$func1) %>% 
-  mutate(GC = cqn$grid1) %>% 
-  pivot_longer(cols = all_of(colnames(se)), names_to = "sample", values_to =  "fit") %>% 
-  left_join(
-    as_tibble(colData(se))
+```{r}
+tmm_mapped_res <- tmm_res %>% 
+  colToRanges("union_peak") %>% 
+  mapByFeature(genes = gencode$gene, prom = promoters)
+```
+
+```{r}
+esr1 <- here("data/ER/esr1_chr10.hg19.bed.gz") %>% 
+  import.bed(
+    colnames = c("chrom", "start", "end", "name", "score"), seqinfo = sq
   ) %>% 
-  ggplot(aes(GC, fit, colour = treatment, group = sample)) +
-  geom_line() +
-  labs(x = "GC content", y = "QR Fit", colour = "Treatment")
-assay(se, "CQN") <- cqn$y + cqn$offset
-plotAssayPCA(se, assay = "CQN", colour = "treatment", label = "sample")
-cqn_res <- fitAssayDiff(se, design = X, offset = cqn$glm.offset, asRanges = TRUE)
-cqn_lt_res <- fitAssayDiff(se, assay = "CQN", design = X, method = "lt", asRanges = TRUE)
-arrange(cqn_res, PValue)
-sum(cqn_res$FDR < 0.05)
-sum(cqn_lt_res$FDR < 0.05)
+  keepStandardChromosomes()
+```
 
+```{r}
+tmm_res %>% 
+  distanceToNearest(esr1) %>% 
+  as_tibble() %>% 
+  arrange(distance) %>% 
+  mutate(p = seq_along(distance) / nrow(.)) %>% 
+  ggplot(aes(distance/1e3, p)) +
+  geom_line()
 ```
 
 
+# Coverage Plots
 
+```{r}
+data("grch37.cytobands")
+head(grch37.cytobands)
+bwfl <- here::here(
+  "data", "ER", glue("{levels(samples$treatment)}_cov_chr10.bw")
+) %>% 
+  BigWigFileList() %>% 
+  setNames(levels(samples$treatment))
+```
+
+
+```{r plot-hfgc-init, fig.cap = "Generic figure from plotHFGC showing coverage for the selected region only"}
+gr <- tmm_res %>% 
+  arrange(PValue) %>% 
+  filter(FDR < 0.05) %>% 
+  colToRanges("union_peak") %>% 
+  # filter_by_overlaps(tss) %>%
+  .[1]
+gr <- keepStandardChromosomes(gr)
+plotHFGC(gr, coverage = bwfl, cytobands = grch37.cytobands)
+```
+
+
+```{r}
+cov_list <- list(ER = bwfl)
+cov_colour <- list(ER = treat_colours[levels(samples$treatment)])
+gene_models <- gencode$exon %>% 
+  select(
+    type, gene = gene_id, exon = exon_id, transcript = transcript_id, 
+    symbol = gene_name
+  ) %>% 
+  keepStandardChromosomes()
+```
+
+```{r plot-hfgc-with-genes, fig.cap = "*Coverage for our region showing the relationship of signal to annotated genes*"}
+plotHFGC(
+  gr, cytobands = grch37.cytobands, 
+  coverage =  cov_list, linecol = cov_colour,
+  genes = gene_models, genecol = "wheat", collapseTranscripts = FALSE,
+  zoom = 50, rotation.title = 90, covsize = 10, genesize = 1
+)
+```
+
+```{r}
+cov_list$H3K27ac <- here::here(
+  "data", "H3K27ac", glue("{levels(samples$treatment)}_cov_chr10.bw")
+) %>% 
+  BigWigFileList() %>% 
+  setNames(levels(samples$treatment))
+cov_colour$H3K27ac <- treat_colours[levels(samples$treatment)]
+```
+
+```{r plot-hfgc-with-genes, fig.cap = "*Coverage for our region showing the relationship of signal to annotated genes*"}
+feat_list <- list(
+  Promoters = GRangesList(Promoter = keepStandardChromosomes(promoters)),
+  ESR1 = GRangesList(ESR1 = esr1)
+)
+plotHFGC(
+  gr, cytobands = grch37.cytobands, 
+  features = feat_list,
+  featcol = list(Promoters = list(Promoter = "yellow2"), ESR1 = list(ESR1 = "royalblue")),
+  coverage =  cov_list, linecol = cov_colour,
+  genes = gene_models, genecol = "wheat", collapseTranscripts = FALSE,
+  zoom = 15, shift = 5e3, rotation.title = 90
+)
+```
+
+## Profile Heatmaps
