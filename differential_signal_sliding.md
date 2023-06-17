@@ -1722,7 +1722,7 @@ sessionInfo()
     ##  [9] mclust_6.0.0                      quantro_1.34.0                   
     ## [11] magrittr_2.0.3                    here_1.0.1                       
     ## [13] glue_1.6.2                        scales_1.2.1                     
-    ## [15] plyranges_1.20.0                  extraChIPs_1.4.2                 
+    ## [15] plyranges_1.20.0                  extraChIPs_1.4.3                 
     ## [17] patchwork_1.1.2                   edgeR_3.42.4                     
     ## [19] limma_3.56.1                      rtracklayer_1.60.0               
     ## [21] BiocParallel_1.34.2               csaw_1.34.0                      

@@ -19,7 +19,7 @@ vignette: >
 
 ```{r setup, echo=FALSE}
 knitr::opts_chunk$set(
-  message = FALSE, warning = FALSE, fig.height = 8, fig.width = 10
+  message = FALSE, warning = FALSE, fig.height = 6, fig.width = 8
 )
 ```
 
