@@ -34,7 +34,7 @@ if (!"BiocManager" %in% rownames(installed.packages()))
   install.packages("BiocManager")
 pkg <- c(
   "tidyverse", "Rsamtools", "csaw", "BiocParallel", "rtracklayer", "edgeR", 
-  "patchwork", "extraChIPs", "plyranges", "scales", "here"
+  "patchwork", "extraChIPs", "plyranges", "scales", "here", "quantro"
 )
 BiocManager::install(pkg, update = FALSE)
 ```
@@ -55,6 +55,7 @@ library(scales)
 library(glue)
 library(ggrepel)
 library(here)
+library(quantro)
 theme_set(theme_bw())
 ```
 
@@ -67,7 +68,7 @@ this. Please ensure you have all data in this location, obtained from
 
 The data itself is ChIP-Seq data targeting the Estrogen Receptor (ER),
 and is taken from the cell-line ZR-75-1 cell-line using data from the
-BioProject , Preprocessing was performed using the
+BioProject , Pre-processing was performed using the
 [`prepareChIPs`](https://github.com/smped/prepareChIPs) workflow,
 written in snakemake (Mölder et al. 2021) and all code is available at
 <https://github.com/smped/PRJNA509779>. ER binding was assessed under
@@ -130,7 +131,7 @@ genome(sq) <- "GRCh37"
 ```
 
 Another key preparatory step for working with peaks is to define a set
-of regions as either blacklisted or greylisted regions. The former are
+of regions as either blacklisted or grey-listed regions. The former are
 known problematic regions based on each genome, with data freely
 available from
 <https://github.com/Boyle-Lab/Blacklist/tree/master/lists>, whilst
@@ -150,7 +151,7 @@ omit_ranges <- c(greylist, blacklist)
 The provided dataset includes six files produced by `macs2 callpeak`
 (Zhang et al. 2008) in the `narrowPeak` format, and these are able to be
 easily parsed using `extraChIPs`. We’ll immediately pass our black &
-greylisted regions to our parsing function so we can exclude these
+grey-listed regions to our parsing function so we can exclude these
 regions right from the start
 
 ``` r
@@ -168,7 +169,7 @@ names(peaks) <- str_remove_all(names(peaks), "_peaks.narrowPeak")
 
 Once loaded, we can easily check how similar our replicates are using
 `plotOverlaps()`. When three or more sets of peaks are contained in the
-`GRangesList`, an UpSet plot will be drawn by deafult.
+`GRangesList`, an UpSet plot will be drawn by default.
 
 ``` r
 plotOverlaps(
@@ -319,7 +320,7 @@ condition, with estimates of each peak’s centre. The next step would be
 to set all peaks as the same width based on the centre position, with a
 common width being 500bp.
 
-In the following we’ll prform multiple operations in a single call
+In the following we’ll perform multiple operations in a single call
 mutate, so let’s make sure we know what’s happening.
 
 1.  `glue("{seqnames}:{centre}:{strand}")` uses `glue` syntax to parse
@@ -450,7 +451,7 @@ alt="RLE plot using logCPM values" />
 values</em></figcaption>
 </figure>
 
-Finally a PCA plot can also provide insight as to where the variaibility
+Finally a PCA plot can also provide insight as to where the variability
 in the data lies.
 
 ``` r
@@ -468,9 +469,15 @@ treatment groups.</em></figcaption>
 
 # Differential Signal Analysis
 
-``` r
-knitr::opts_chunk$set(eval = FALSE)
-```
+## Statistical Testing
+
+In order to perform Differential Signal Analysis, we simply need to
+define a model matrix, as for conventional analysis using `edgeR` or
+`limma`. We can then pass this, along with our fixed-width counts to
+`fitAssayDiff()`. By default normalisation will be *library-size*
+normalisation, as is a common default strategy for ChIP-Seq data. In
+contrast to sliding window approaches, these results represent our final
+results and there is no need for merging windows.
 
 ``` r
 X <- model.matrix(~treatment, data = colData(se))
@@ -478,10 +485,51 @@ ls_res <- fitAssayDiff(se, design = X, asRanges = TRUE)
 sum(ls_res$FDR < 0.05)
 ```
 
+    ## [1] 3
+
+TMM normalisation (Robinson and Oshlack 2010) is another common
+strategy, which relies on the data from all treatment groups being drawn
+from the same distributions. We can formally test this using the package
+`quantro` (Hicks and Irizarry 2015) , which produces p-values for 1)
+H<sub>0</sub>: Group medians are drawn from the same distribution, and
+2) H<sub>0</sub>: Group-specific distributions are the same.
+
+``` r
+set.seed(100)
+qtest <- assay(se, "counts") %>% 
+  quantro(groupFactor = se$treatment, B = 1e3)
+qtest
+```
+
+    ## quantro: Test for global differences in distributions
+    ##    nGroups:  2 
+    ##    nTotSamples:  6 
+    ##    nSamplesinGroups:  3 3 
+    ##    anovaPval:  0.90754 
+    ##    quantroStat:  0.21859 
+    ##    quantroPvalPerm:  0.572
+
+Here, both p-values are \>0.05, so in conjunction with out visual
+inspection earlier, we can confidently apply TMM normalisation. To apply
+this, we simply specify the argument `norm = "TMM"` when we call
+`fitAssayDiff()`. In the analysis below, we’ve also specified a
+fold-change threshold `(fc = 1.2)`, below which, changes in signal are
+considered to not be of interest (McCarthy and Smyth 2009). This
+threshold is incorporated into the testing so there is no requirement
+for *post-hoc* filtering based on a threshold.
+
 ``` r
 tmm_res <- fitAssayDiff(se, design = X, norm = "TMM", asRanges = TRUE, fc = 1.2)
 sum(tmm_res$FDR < 0.05)
 ```
+
+    ## [1] 7
+
+An MA-plot is a common way of inspecting results and in the following we
+use the original ‘union_peak’ in our labelling of points. This serves as
+a reminder that the fixed-width windows are in fact *a proxy* for the
+entire region for which we have confidently detected ChIP signal, and
+that these windows are truly the regions of interest.
 
 ``` r
 tmm_res %>% 
@@ -489,13 +537,31 @@ tmm_res %>%
   mutate(`FDR < 0.05` = FDR < 0.05) %>% 
   ggplot(aes(logCPM, logFC)) +
   geom_point(aes(colour = `FDR < 0.05`)) +
-  geom_smooth(method = "lm", se = FALSE) +
+  geom_smooth(se = FALSE) +
   geom_label_repel(
     aes(label = union_peak), colour = "red",
     data = . %>% dplyr::filter(FDR < 0.05)
   ) +
   scale_colour_manual(values = c("black", "red"))
 ```
+
+<figure>
+<img src="differential_signal_fixed_files/figure-gfm/plot-ma-1.png"
+alt="MA-plot after fitting using TMM normalisation and applying a fold-change threshold during testing. Points are labelled using the original windows obtained when merging replicats and treatment groups." />
+<figcaption aria-hidden="true"><em>MA-plot after fitting using TMM
+normalisation and applying a fold-change threshold during testing.
+Points are labelled using the original windows obtained when merging
+replicats and treatment groups.</em></figcaption>
+</figure>
+
+## Mapping to Genes
+
+Whilst knowledge of which regions are showing differential signal, the
+fundamental question we are usually asking is about the downstream
+regulatory consequences, such as the target gene. Before we can map
+peaks to genes, we’ll need to define our genes. In the following, we’ll
+use the provided Gencode gene mappings at the gene, transcript and exon
+level.
 
 ``` r
 gencode <- here("data/gencode.v43lift37.chr10.annotation.gtf.gz") %>% 
@@ -506,83 +572,313 @@ seqlevels(gencode) <- seqlevels(sq)
 seqinfo(gencode) <- sq
 ```
 
+Mapping to genes using `mapByFeature()` uses additional annotations,
+such as whether the peak overlaps a promoter, enhancer or long-range
+interaction. Here we’ll just use promoters, so let’s create a set of
+promoters from our transcript-level information, ensuring we incorporate
+all possible promoters within a gene, and merging any overlapping ranges
+using `reduceMC()`
+
 ``` r
-tss <- gencode$transcript %>% 
-  resize(width = 1, fix = "start") %>% 
-  select(gene_id, ends_with("name")) %>% 
-  reduceMC(min.gapwidth = 0)
 promoters <- gencode$transcript %>% 
     select(gene_id, ends_with("name")) %>% 
     promoters(upstream = 2500, downstream = 500) %>% 
     reduceMC(simplify = FALSE)
+promoters
 ```
+
+    ## GRanges object with 1678 ranges and 3 metadata columns:
+    ##          seqnames            ranges strand |
+    ##             <Rle>         <IRanges>  <Rle> |
+    ##      [1]    chr10 42678287-42681286      + |
+    ##      [2]    chr10 42702938-42705937      + |
+    ##      [3]    chr10 42735669-42738668      + |
+    ##      [4]    chr10 42743933-42746932      + |
+    ##      [5]    chr10 42968428-42973155      + |
+    ##      ...      ...               ...    ... .
+    ##   [1674]    chr10 99635155-99638154      - |
+    ##   [1675]    chr10 99643500-99646805      - |
+    ##   [1676]    chr10 99695536-99698535      - |
+    ##   [1677]    chr10 99770595-99773594      - |
+    ##   [1678]    chr10 99789879-99793085      - |
+    ##                                                                     gene_id
+    ##                                                             <CharacterList>
+    ##      [1]                                                ENSG00000237592.2_5
+    ##      [2]                                                ENSG00000271650.1_7
+    ##      [3]                                                ENSG00000290458.1_2
+    ##      [4]                                                ENSG00000274167.5_8
+    ##      [5] ENSG00000185904.12_9,ENSG00000185904.12_9,ENSG00000185904.12_9,...
+    ##      ...                                                                ...
+    ##   [1674]                                                  ENSG00000265398.1
+    ##   [1675]                        ENSG00000095713.14_13,ENSG00000095713.14_13
+    ##   [1676]                                              ENSG00000095713.14_13
+    ##   [1677]                                              ENSG00000095713.14_13
+    ##   [1678]                        ENSG00000095713.14_13,ENSG00000095713.14_13
+    ##                                  gene_name
+    ##                            <CharacterList>
+    ##      [1]                       IGKV1OR10-1
+    ##      [2]                   ENSG00000271650
+    ##      [3]                   ENSG00000290458
+    ##      [4]                   ENSG00000274167
+    ##      [5] LINC00839,LINC00839,LINC00839,...
+    ##      ...                               ...
+    ##   [1674]                        AL139239.1
+    ##   [1675]                     CRTAC1,CRTAC1
+    ##   [1676]                            CRTAC1
+    ##   [1677]                            CRTAC1
+    ##   [1678]                     CRTAC1,CRTAC1
+    ##                                        transcript_name
+    ##                                        <CharacterList>
+    ##      [1]                               IGKV1OR10-1-201
+    ##      [2]                               ENST00000605702
+    ##      [3]                               ENST00000622823
+    ##      [4]                               ENST00000622650
+    ##      [5] LINC00839-204,LINC00839-203,LINC00839-202,...
+    ##      ...                                           ...
+    ##   [1674]                                AL139239.1-201
+    ##   [1675]                         CRTAC1-205,CRTAC1-206
+    ##   [1676]                                    CRTAC1-204
+    ##   [1677]                                    CRTAC1-201
+    ##   [1678]                         CRTAC1-203,CRTAC1-202
+    ##   -------
+    ##   seqinfo: 84 sequences from GRCh37 genome
+
+Now we’ll pass these to `mapByFeature()`, but first, we’ll place the
+original ‘union_peak’ back as the core of the GRanges object. This will
+retain all the results from testing, but ensures the correct region is
+mapped to genes.
 
 ``` r
 tmm_mapped_res <- tmm_res %>% 
   colToRanges("union_peak") %>% 
-  mapByFeature(genes = gencode$gene, prom = promoters)
+  mapByFeature(genes = gencode$gene, prom = promoters) %>% 
+  mutate(
+    status = case_when(
+      FDR >= .05 ~ "Unchanged",
+      logFC > 0 ~ "Increased",
+      logFC < 0 ~ "Decreased"
+    )
+  )
+arrange(tmm_mapped_res, PValue)
 ```
 
-``` r
-esr1 <- here("data/ER/esr1_chr10.hg19.bed.gz") %>% 
-  import.bed(
-    colnames = c("chrom", "start", "end", "name", "score"), seqinfo = sq
-  ) %>% 
-  keepStandardChromosomes()
-```
+    ## GRanges object with 188 ranges and 10 metadata columns:
+    ##         seqnames            ranges strand |        E2     E2DHT         n
+    ##            <Rle>         <IRanges>  <Rle> | <logical> <logical> <numeric>
+    ##     [1]    chr10 81101906-81102928      * |      TRUE      TRUE         2
+    ##     [2]    chr10 79629641-79630271      * |      TRUE      TRUE         2
+    ##     [3]    chr10 89407752-89408138      * |     FALSE      TRUE         1
+    ##     [4]    chr10 52233596-52233998      * |      TRUE      TRUE         2
+    ##     [5]    chr10 91651138-91651433      * |     FALSE      TRUE         1
+    ##     ...      ...               ...    ... .       ...       ...       ...
+    ##   [184]    chr10 89395292-89395626      * |      TRUE      TRUE         2
+    ##   [185]    chr10 82723984-82724328      * |      TRUE      TRUE         2
+    ##   [186]    chr10 93120411-93121224      * |      TRUE      TRUE         2
+    ##   [187]    chr10 95755308-95755721      * |      TRUE      TRUE         2
+    ##   [188]    chr10 79190987-79191351      * |     FALSE      TRUE         1
+    ##               logFC    logCPM      PValue         FDR
+    ##           <numeric> <numeric>   <numeric>   <numeric>
+    ##     [1]    1.880493   7.91492 2.50406e-25 4.70764e-23
+    ##     [2]    0.940221   8.07204 8.07816e-08 7.59347e-06
+    ##     [3]    1.578056   6.16574 4.18078e-07 2.61995e-05
+    ##     [4]    1.057814   6.67466 5.73897e-05 2.69732e-03
+    ##     [5]    1.546530   5.15431 1.75562e-04 6.60112e-03
+    ##     ...         ...       ...         ...         ...
+    ##   [184] -0.01346141   6.36140    0.961749    0.982656
+    ##   [185] -0.00855862   6.91968    0.972422    0.988154
+    ##   [186] -0.01173559   9.32397    0.979561    0.988154
+    ##   [187]  0.00721240   5.88042    0.982898    0.988154
+    ##   [188] -0.00157801   6.41182    0.994914    0.994914
+    ##                                            gene_id
+    ##                                    <CharacterList>
+    ##     [1]                       ENSG00000108179.14_6
+    ##     [2]                      ENSG00000151208.17_11
+    ##     [3]   ENSG00000225913.2_9,ENSG00000196566.2_10
+    ##     [4] ENSG00000198964.14_10,ENSG00000225303.2_10
+    ##     [5]                        ENSG00000280560.3_9
+    ##     ...                                        ...
+    ##   [184]   ENSG00000225913.2_9,ENSG00000196566.2_10
+    ##   [185]                        ENSG00000227209.1_5
+    ##   [186]                        ENSG00000289228.2_2
+    ##   [187]                      ENSG00000138193.17_12
+    ##   [188]                      ENSG00000156113.25_17
+    ##                               gene_name      status
+    ##                         <CharacterList> <character>
+    ##     [1]                            PPIF   Increased
+    ##     [2]                            DLG5   Increased
+    ##     [3] ENSG00000225913,ENSG00000196566   Increased
+    ##     [4]           SGMS1,ENSG00000225303   Increased
+    ##     [5]                       LINC01374   Increased
+    ##     ...                             ...         ...
+    ##   [184] ENSG00000225913,ENSG00000196566   Unchanged
+    ##   [185]                         WARS2P1   Unchanged
+    ##   [186]                 ENSG00000289228   Unchanged
+    ##   [187]                           PLCE1   Unchanged
+    ##   [188]                          KCNMA1   Unchanged
+    ##   -------
+    ##   seqinfo: 1 sequence from an unspecified genome; no seqlengths
+
+# Inspection of Results
+
+## Profile Heatmaps
+
+When analysing a transcription factor, checking the binding profile
+across our treatment groups can be informative, and is often performed
+using ‘Profile Heatmaps’ where coverage is smoothed within bins
+surrounding our peak centre.
+
+The function `getProfileData()` takes a set of ranges and a
+BigWigFileList, and performs the smoothing, which is then passed to the
+function `plotProfileHeatmap()`. Let’s first check the basic coverage
+using the SPMR-scaled values as produced by `macs2`. These are
+equivalent to CPM values and can be log-transformed as required.
 
 ``` r
-tmm_res %>% 
-  distanceToNearest(esr1) %>% 
-  as_tibble() %>% 
-  arrange(distance) %>% 
-  mutate(p = seq_along(distance) / nrow(.)) %>% 
-  ggplot(aes(distance/1e3, p)) +
-  geom_line()
-```
-
-# Coverage Plots
-
-``` r
-data("grch37.cytobands")
-head(grch37.cytobands)
-bwfl <- here::here(
+cov_bw <- here::here(
   "data", "ER", glue("{levels(samples$treatment)}_cov_chr10.bw")
 ) %>% 
   BigWigFileList() %>% 
   setNames(treat_levels)
 ```
 
-``` r
-gr <- tmm_res %>% 
-  arrange(PValue) %>% 
-  filter(FDR < 0.05) %>% 
-  colToRanges("union_peak") %>% 
-  # filter_by_overlaps(tss) %>%
-  .[1]
-gr <- keepStandardChromosomes(gr)
-plotHFGC(gr, coverage = bwfl, cytobands = grch37.cytobands)
-```
+The following shows the three steps of 1) defining the ranges, 2)
+obtaining the smoothed binding profiles, and 3) drawing the heatmap.
+Note that we can facet the heatmaps by selecting the ‘status’ column to
+separate any Increased or Decreased regions. By default, this will also
+draw the smoothed lines in the top panel using different colours.
+
+(Note the SPMR values were calculated using the complete genome and will
+differ significantly from those obtained during model fitting above, as
+this will only use library sizes for our highly restricted subset of the
+genome.)
 
 ``` r
-cov_list <- list(ER = bwfl)
-cov_colour <- list(ER = treat_colours[treat_levels])
-gene_models <- gencode$exon %>% 
-  select(
-    type, gene = gene_id, exon = exon_id, transcript = transcript_id, 
-    symbol = gene_name
-  ) %>% 
-  keepStandardChromosomes()
+sig_ranges <- filter(tmm_mapped_res, FDR < 0.05)
+pd <- getProfileData(cov_bw, sig_ranges)
+plotProfileHeatmap(pd, "profile_data", facetY = "status") +
+  scale_fill_gradient(low = "white", high = "red") +
+  labs(fill = "logCPM", colour = "Status")
 ```
 
+<figure>
+<img
+src="differential_signal_fixed_files/figure-gfm/cov-profile-heatmaps-1.png"
+alt="Profile Heatmap showing read coverage for all sites considered as showing evidence of differential signal. The sites are annotated by status using facets along the y-axis" />
+<figcaption aria-hidden="true"><em>Profile Heatmap showing read coverage
+for all sites considered as showing evidence of differential signal. The
+sites are annotated by status using facets along the
+y-axis</em></figcaption>
+</figure>
+
+As an alternative to CPM-like coverage values, we can use
+fold-enrichment over the input sample(s), as is also produced by
+`macs2 bdgcmp`. This data isn’t generally visualised using
+log-transformation so we’ll set `log = FALSE` in our call to
+`getProfileData()`
+
 ``` r
-plotHFGC(
-  gr, cytobands = grch37.cytobands, 
-  coverage =  cov_list, linecol = cov_colour,
-  genes = gene_models, genecol = "wheat", collapseTranscripts = FALSE,
-  zoom = 50, rotation.title = 90, covsize = 10, genesize = 1
-)
+fe_bw <- here("data", "ER", glue("{treat_levels}_FE_chr10.bw")) %>% 
+  BigWigFileList() %>% 
+  setNames(treat_levels)
+pd_fe <- getProfileData(fe_bw, sig_ranges, log = FALSE) 
+pd_fe %>% 
+  plotProfileHeatmap("profile_data") +
+  scale_fill_gradient(low = "white", high = "red") +
+  labs(fill = "Fold\nEnrichment")
 ```
+
+<figure>
+<img
+src="differential_signal_fixed_files/figure-gfm/fe-profile-heatmaps-1.png"
+alt="Profile Heatmap showing fold-enrichment over input samples for all sites consiered as showing evidence of differential signal." />
+<figcaption aria-hidden="true"><em>Profile Heatmap showing
+fold-enrichment over input samples for all sites consiered as showing
+evidence of differential signal.</em></figcaption>
+</figure>
+
+## Coverage Plots
+
+As well as showing summarised values across all sites, we may wish to
+check the binding patterns in relation to other genomic features.
+`plotHFGC()` enables easy visualisation of a region incorporating HiC
+(H), Features (F), Genes (G) and Coverage (C), with considerable
+flexibility in how many tracks are able to be shown. `plotHFGC()` relies
+on the infrastructure provided by `Gviz` (Hahne and Ivanek 2016) so some
+familiarity with this package is helpful, but not essential.
+
+The minimum requirement is a GRanges object and coverage is obviously
+important, so let’s choose our most highly-ranked result, which is
+mapped to the gene *PPIF*, and the SPMR-based BigWigFileList.
+
+``` r
+gr <- arrange(tmm_mapped_res, PValue)[1]
+gr
+```
+
+    ## GRanges object with 1 range and 10 metadata columns:
+    ##       seqnames            ranges strand |        E2     E2DHT         n
+    ##          <Rle>         <IRanges>  <Rle> | <logical> <logical> <numeric>
+    ##   [1]    chr10 81101906-81102928      * |      TRUE      TRUE         2
+    ##           logFC    logCPM      PValue         FDR              gene_id
+    ##       <numeric> <numeric>   <numeric>   <numeric>      <CharacterList>
+    ##   [1]   1.88049   7.91492 2.50406e-25 4.70764e-23 ENSG00000108179.14_6
+    ##             gene_name      status
+    ##       <CharacterList> <character>
+    ##   [1]            PPIF   Increased
+    ##   -------
+    ##   seqinfo: 1 sequence from an unspecified genome; no seqlengths
+
+``` r
+plotHFGC(gr, coverage = cov_bw)
+```
+
+<figure>
+<img
+src="differential_signal_fixed_files/figure-gfm/plot-hfgc-basic-1.png"
+alt="The most simple coverage output for plotHFGC" />
+<figcaption aria-hidden="true"><em>The most simple coverage output for
+plotHFGC</em></figcaption>
+</figure>
+
+As can be seen from the y-limits, although the shape of the peaks is the
+same, the coverage is significantly different. We could manually set
+this to be the same on both tracks
+
+``` r
+plotHFGC(gr, coverage = cov_bw, ylim = c(0, 5))
+```
+
+<figure>
+<img
+src="differential_signal_fixed_files/figure-gfm/plot-hfgc-ylim-1.png"
+alt="The same plot as above, but setting y-axis limits manually" />
+<figcaption aria-hidden="true"><em>The same plot as above, but setting
+y-axis limits manually</em></figcaption>
+</figure>
+
+An alternative may be to plot both treatments on the same track. By
+default, if a BigWigFileList is passed to `plotHFGC()` each BigWig file
+will be drawn on a separate track. To overlap the tracks, we can pass a
+named list of BigWigFileList objects and a corresponding list of
+colours, using the same structure
+
+``` r
+cov_list <- list(ER = cov_bw)
+cov_colours <- list(ER = treat_colours)
+plotHFGC(gr, coverage = cov_list, linecol = cov_colours)
+```
+
+<figure>
+<img
+src="differential_signal_fixed_files/figure-gfm/plot-hfgc-overlap-1.png"
+alt="Coverage tracks can be overlaid to ensure a coparable y-axis" />
+<figcaption aria-hidden="true"><em>Coverage tracks can be overlaid to
+ensure a coparable y-axis</em></figcaption>
+</figure>
+
+We can add additional coverage tracks using the same strategy. Given we
+used H3K27ac data in the sliding windows vignette, let’s load H3K27ac
+coverage and add this to our plots.
 
 ``` r
 cov_list$H3K27ac <- here::here(
@@ -590,46 +886,185 @@ cov_list$H3K27ac <- here::here(
 ) %>% 
   BigWigFileList() %>% 
   setNames(treat_levels)
-cov_colour$H3K27ac <- treat_colours[treat_levels]
+cov_colours$H3K27ac <- treat_colours[treat_levels]
+plotHFGC(gr, coverage = cov_list, linecol = cov_colours, rotation.title = 90)
 ```
 
+<figure>
+<img
+src="differential_signal_fixed_files/figure-gfm/plot-hfgc-h3k27ac-1.png"
+alt="By overlapping tracks, multiple ChIP targets can be shown, here with the addition of H3K27ac coverage" />
+<figcaption aria-hidden="true"><em>By overlapping tracks, multiple ChIP
+targets can be shown, here with the addition of H3K27ac
+coverage</em></figcaption>
+</figure>
+
+Now let’s zoom out and add some cytogenetic bands for reference
+
 ``` r
-feat_list <- list(
-  Promoters = GRangesList(Promoter = keepStandardChromosomes(promoters)),
-  ESR1 = GRangesList(ESR1 = esr1)
+data("grch37.cytobands")
+plotHFGC(
+  gr, 
+  coverage = cov_list, linecol = cov_colours, rotation.title = 90,
+  cytobands = grch37.cytobands, zoom = 20
+)
+```
+
+<figure>
+<img
+src="differential_signal_fixed_files/figure-gfm/plot-hfgc-cytobands-1.png"
+alt="Cytogentic bnds are providing for some genomes with extraChIPs. Ranges can also be zoomed in or out as required." />
+<figcaption aria-hidden="true"><em>Cytogentic bnds are providing for
+some genomes with <code>extraChIPs</code>. Ranges can also be zoomed in
+or out as required.</em></figcaption>
+</figure>
+
+Next, we might like to add some genes or transcripts. First we’ll use
+the exon element of our Gencode data to create a suitable object for
+Gviz.
+
+``` r
+gene_models <- gencode$exon %>% 
+  select(
+    type, gene = gene_id, exon = exon_id, transcript = transcript_id, 
+    symbol = gene_name
+  ) %>% 
+  keepStandardChromosomes()
+plotHFGC(
+  gr, 
+  genes = gene_models, genecol = "wheat",
+  coverage = cov_list, linecol = cov_colours, rotation.title = 90,
+  cytobands = grch37.cytobands, zoom = 20
+)
+```
+
+<figure>
+<img
+src="differential_signal_fixed_files/figure-gfm/plot-hfgc-genes-1.png"
+alt="Genes can be added as a separate track. Here we can see that ER binding is upstream of the gene PPIF, with H3K27ac cverage associated with both the promoter and ER binding, suggesting that our particular range is in an enhancer." />
+<figcaption aria-hidden="true"><em>Genes can be added as a separate
+track. Here we can see that ER binding is upstream of the gene PPIF,
+with H3K27ac cverage associated with both the promoter and ER binding,
+suggesting that our particular range is in an
+enhancer.</em></figcaption>
+</figure>
+
+Given that we’ve already defined some promoters for our mapping to
+genes, we can add these are features. For features, we need to pass
+`plotHFGC()` a named GRangesList, and the names are used to provide
+colours to the features
+
+``` r
+feat_grl <- GRangesList(Promoters = promoters) %>% 
+  keepStandardChromosomes()
+feat_colours <- list(Promoters = "yellow2")
+plotHFGC(
+  gr, 
+  features = feat_grl, featcol = feat_colours,
+  genes = gene_models, genecol = "wheat",
+  coverage = cov_list, linecol = cov_colours, rotation.title = 90,
+  cytobands = grch37.cytobands, zoom = 20
+)
+```
+
+<figure>
+<img
+src="differential_signal_fixed_files/figure-gfm/plot-hfgc-features-1.png"
+alt="Any type of genomic feature can be added. Here, possible promoters are shown in yellow" />
+<figcaption aria-hidden="true"><em>Any type of genomic feature can be
+added. Here, possible promoters are shown in yellow</em></figcaption>
+</figure>
+
+We may also wish to add known binding sites for ER as provided by
+Encode. The file `esr1_chr10.hg19.bed.gz` was obtained from the UCSC
+Table Browser, and this combines ER (i.e. *ESR1*) binding sites for
+multiple cell lines.
+
+``` r
+esr1 <- here("data/ER/esr1_chr10.hg19.bed.gz") %>% 
+  import.bed(
+    colnames = c("chrom", "start", "end", "name", "score"), seqinfo = sq
+  ) %>% 
+  keepStandardChromosomes()
+feat_grl$ESR1 <- esr1
+feat_colours <- list(Promoters = "yellow2", ESR1 = "royalblue")
+plotHFGC(
+  gr, 
+  features = feat_grl, featcol = feat_colours,
+  genes = gene_models, genecol = "wheat",
+  coverage = cov_list, linecol = cov_colours, rotation.title = 90,
+  cytobands = grch37.cytobands, zoom = 20
+)
+```
+
+<figure>
+<img
+src="differential_signal_fixed_files/figure-gfm/plot-hfgc-esr1-1.png"
+alt="Multiple features can be added to a single track. Here ER sites defined by ENCODE are shown in blue" />
+<figcaption aria-hidden="true"><em>Multiple features can be added to a
+single track. Here ER sites defined by ENCODE are shown in
+blue</em></figcaption>
+</figure>
+
+We can separate out these features onto separate tracks using a similar
+strategy to our coverage tracks. If we pass a GRangesList, all features
+will be drawn on the same track, however, if we pass a list of
+GRangesList objects, each list element will be drawn as a separate
+track. Our colours object will now need to be specified as a list with
+the same structure.
+
+``` r
+feat_list <- list(Promoters = feat_grl["Promoters"], ESR1 = feat_grl["ESR1"])
+feat_colours <- list(
+  Promoters = c(Promoters = "yellow2"), ESR1 = c(ESR1 = "royalblue")
 )
 plotHFGC(
-  gr, cytobands = grch37.cytobands, 
-  features = feat_list,
-  featcol = list(Promoters = list(Promoter = "yellow2"), ESR1 = list(ESR1 = "royalblue")),
-  coverage =  cov_list, linecol = cov_colour,
-  genes = gene_models, genecol = "wheat", collapseTranscripts = FALSE,
-  zoom = 15, shift = 5e3, rotation.title = 90
+  gr, 
+  features = feat_list, featcol = feat_colours, featsize = 1.5,
+  genes = gene_models, genecol = "wheat",
+  coverage = cov_list, linecol = cov_colours, rotation.title = 90,
+  cytobands = grch37.cytobands, zoom = 15, shift = 6e3,
+  fontsize = 12, cex.axis = 0.8, highlight = rgb(0.7, 0.7, 1)
 )
 ```
 
-## Profile Heatmaps
+<figure>
+<img
+src="differential_signal_fixed_files/figure-gfm/plothfgc-feat-list-1.png"
+alt="Features can also be shown on eparate tracks with informative track labels. Plots can also be shifted and multiple parameters are also able to be customised" />
+<figcaption aria-hidden="true"><em>Features can also be shown on eparate
+tracks with informative track labels. Plots can also be shifted and
+multiple parameters are also able to be customised</em></figcaption>
+</figure>
 
-``` r
-sig_ranges <- filter(tmm_res, FDR < 0.05)
-pd <- getProfileData(bwfl, sig_ranges)
-plotProfileHeatmap(pd, "profile_data") +
-  scale_fill_gradient(low = "white", high = "red") +
-  labs(fill = "logCPM")
-```
+Although not demonstrated here, the same principles for multiple
+gene-level tracks can be applied. This is particularly useful if wishing
+to plot differentially expressed genes on a separate track to those
+which are undetected or unchanged.
 
-``` r
-fe_bwfl <- here("data", "ER", glue("{treat_levels}_FE_chr10.bw")) %>% 
-  BigWigFileList() %>% 
-  setNames(treat_levels)
-fe_bwfl %>% 
-  getProfileData(sig_ranges, log = FALSE) %>% 
-  plotProfileHeatmap("profile_data") +
-  scale_fill_gradient(low = "white", high = "red") +
-  labs(fill = "Fold\nEnrichment")
-```
+Additional plotting functions which may be useful are also demonstrated
+in the sliding windows vignette.
+
+## References
 
 <div id="refs" class="references csl-bib-body hanging-indent">
+
+<div id="ref-gviz" class="csl-entry">
+
+Hahne, Florian, and Robert Ivanek. 2016. “Statistical Genomics: Methods
+and Protocols.” In, edited by Ewy Mathé and Sean Davis, 335–51. New
+York, NY: Springer New York.
+<https://doi.org/10.1007/978-1-4939-3578-9_16>.
+
+</div>
+
+<div id="ref-Hicks2015-ee" class="csl-entry">
+
+Hicks, Stephanie C, and Rafael A Irizarry. 2015. “Quantro: A Data-Driven
+Approach to Guide the Choice of an Appropriate Normalization Method.”
+*Genome Biol.* 16 (1): 117.
+
+</div>
 
 <div id="ref-csaw2016" class="csl-entry">
 
@@ -639,12 +1074,28 @@ Windows.” *Nucleic Acids Res.* 44 (5): e45.
 
 </div>
 
+<div id="ref-McCarthy2009-qf" class="csl-entry">
+
+McCarthy, Davis J, and Gordon K Smyth. 2009. “Testing Significance
+Relative to a Fold-Change Threshold Is a TREAT.” *Bioinformatics* 25
+(6): 765–71.
+
+</div>
+
 <div id="ref-Molder2021-mo" class="csl-entry">
 
 Mölder, Felix, Kim Philipp Jablonski, Brice Letcher, Michael B Hall,
 Christopher H Tomkins-Tinch, Vanessa Sochat, Jan Forster, et al. 2021.
 “Sustainable Data Analysis with Snakemake.” *F1000Res.* 10 (January):
 33.
+
+</div>
+
+<div id="ref-Robinson2010-qp" class="csl-entry">
+
+Robinson, Mark D, and Alicia Oshlack. 2010. “A Scaling Normalization
+Method for Differential Expression Analysis of
+<span class="nocase">RNA-seq</span> Data.” *Genome Biol.* 11 (3): R25.
 
 </div>
 
@@ -667,3 +1118,137 @@ Analysis of ChIP-Seq (MACS).” *Genome Biol.* 9 (9): R137.
 </div>
 
 </div>
+
+<br>
+
+## Session Info
+
+``` r
+sessionInfo()
+```
+
+    ## R version 4.3.0 (2023-04-21)
+    ## Platform: x86_64-pc-linux-gnu (64-bit)
+    ## Running under: Ubuntu 20.04.6 LTS
+    ## 
+    ## Matrix products: default
+    ## BLAS:   /usr/lib/x86_64-linux-gnu/blas/libblas.so.3.9.0 
+    ## LAPACK: /usr/lib/x86_64-linux-gnu/lapack/liblapack.so.3.9.0
+    ## 
+    ## locale:
+    ##  [1] LC_CTYPE=en_AU.UTF-8       LC_NUMERIC=C              
+    ##  [3] LC_TIME=en_AU.UTF-8        LC_COLLATE=en_AU.UTF-8    
+    ##  [5] LC_MONETARY=en_AU.UTF-8    LC_MESSAGES=en_AU.UTF-8   
+    ##  [7] LC_PAPER=en_AU.UTF-8       LC_NAME=C                 
+    ##  [9] LC_ADDRESS=C               LC_TELEPHONE=C            
+    ## [11] LC_MEASUREMENT=en_AU.UTF-8 LC_IDENTIFICATION=C       
+    ## 
+    ## time zone: Australia/Adelaide
+    ## tzcode source: system (glibc)
+    ## 
+    ## attached base packages:
+    ## [1] stats4    stats     graphics  grDevices utils     datasets  methods  
+    ## [8] base     
+    ## 
+    ## other attached packages:
+    ##  [1] quantro_1.34.0              here_1.0.1                 
+    ##  [3] ggrepel_0.9.3               glue_1.6.2                 
+    ##  [5] scales_1.2.1                plyranges_1.20.0           
+    ##  [7] extraChIPs_1.4.3            patchwork_1.1.2            
+    ##  [9] edgeR_3.42.4                limma_3.56.1               
+    ## [11] rtracklayer_1.60.0          BiocParallel_1.34.2        
+    ## [13] csaw_1.34.0                 SummarizedExperiment_1.30.1
+    ## [15] Biobase_2.60.0              MatrixGenerics_1.12.0      
+    ## [17] matrixStats_1.0.0           Rsamtools_2.16.0           
+    ## [19] Biostrings_2.68.1           XVector_0.40.0             
+    ## [21] GenomicRanges_1.52.0        GenomeInfoDb_1.36.0        
+    ## [23] IRanges_2.34.0              S4Vectors_0.38.1           
+    ## [25] BiocGenerics_0.46.0         lubridate_1.9.2            
+    ## [27] forcats_1.0.0               stringr_1.5.0              
+    ## [29] dplyr_1.1.2                 purrr_1.0.1                
+    ## [31] readr_2.1.4                 tidyr_1.3.0                
+    ## [33] tibble_3.2.1                ggplot2_3.4.2              
+    ## [35] tidyverse_2.0.0            
+    ## 
+    ## loaded via a namespace (and not attached):
+    ##   [1] ProtGenerics_1.32.0        bitops_1.0-7              
+    ##   [3] httr_1.4.6                 RColorBrewer_1.1-3        
+    ##   [5] doParallel_1.0.17          InteractionSet_1.28.0     
+    ##   [7] tools_4.3.0                doRNG_1.8.6               
+    ##   [9] backports_1.4.1            utf8_1.2.3                
+    ##  [11] R6_2.5.1                   HDF5Array_1.28.1          
+    ##  [13] lazyeval_0.2.2             mgcv_1.8-42               
+    ##  [15] Gviz_1.44.0                rhdf5filters_1.12.1       
+    ##  [17] GetoptLong_1.0.5           withr_2.5.0               
+    ##  [19] prettyunits_1.1.1          gridExtra_2.3             
+    ##  [21] base64_2.0.1               VennDiagram_1.7.3         
+    ##  [23] preprocessCore_1.62.1      cli_3.6.1                 
+    ##  [25] formatR_1.14               labeling_0.4.2            
+    ##  [27] genefilter_1.82.1          askpass_1.1               
+    ##  [29] foreign_0.8-84             siggenes_1.74.0           
+    ##  [31] illuminaio_0.42.0          dichromat_2.0-0.1         
+    ##  [33] scrime_1.3.5               BSgenome_1.68.0           
+    ##  [35] rstudioapi_0.14            RSQLite_2.3.1             
+    ##  [37] generics_0.1.3             shape_1.4.6               
+    ##  [39] BiocIO_1.10.0              vroom_1.6.3               
+    ##  [41] Matrix_1.5-4.1             interp_1.1-4              
+    ##  [43] futile.logger_1.4.3        fansi_1.0.4               
+    ##  [45] lifecycle_1.0.3            yaml_2.3.7                
+    ##  [47] rhdf5_2.44.0               BiocFileCache_2.8.0       
+    ##  [49] grid_4.3.0                 blob_1.2.4                
+    ##  [51] crayon_1.5.2               lattice_0.21-8            
+    ##  [53] ComplexUpset_1.3.3         GenomicFeatures_1.52.0    
+    ##  [55] annotate_1.78.0            KEGGREST_1.40.0           
+    ##  [57] pillar_1.9.0               knitr_1.43                
+    ##  [59] ComplexHeatmap_2.16.0      beanplot_1.3.1            
+    ##  [61] metapod_1.8.0              rjson_0.2.21              
+    ##  [63] codetools_0.2-19           data.table_1.14.8         
+    ##  [65] vctrs_0.6.2                png_0.1-8                 
+    ##  [67] gtable_0.3.3               cachem_1.0.8              
+    ##  [69] xfun_0.39                  S4Arrays_1.0.4            
+    ##  [71] ggside_0.2.2               survival_3.5-5            
+    ##  [73] iterators_1.0.14           GenomicInteractions_1.34.0
+    ##  [75] nlme_3.1-162               bit64_4.0.5               
+    ##  [77] progress_1.2.2             filelock_1.0.2            
+    ##  [79] rprojroot_2.0.3            nor1mix_1.3-0             
+    ##  [81] rpart_4.1.19               colorspace_2.1-0          
+    ##  [83] DBI_1.1.3                  Hmisc_5.1-0               
+    ##  [85] nnet_7.3-18                tidyselect_1.2.0          
+    ##  [87] bit_4.0.5                  compiler_4.3.0            
+    ##  [89] curl_5.0.0                 htmlTable_2.4.1           
+    ##  [91] xml2_1.3.4                 DelayedArray_0.26.3       
+    ##  [93] checkmate_2.2.0            quadprog_1.5-8            
+    ##  [95] rappdirs_0.3.3             digest_0.6.31             
+    ##  [97] rmarkdown_2.22             GEOquery_2.68.0           
+    ##  [99] htmltools_0.5.5            pkgconfig_2.0.3           
+    ## [101] jpeg_0.1-10                base64enc_0.1-3           
+    ## [103] sparseMatrixStats_1.12.0   highr_0.10                
+    ## [105] dbplyr_2.3.2               fastmap_1.1.1             
+    ## [107] ensembldb_2.24.0           rlang_1.1.1               
+    ## [109] GlobalOptions_0.1.2        htmlwidgets_1.6.2         
+    ## [111] DelayedMatrixStats_1.22.0  EnrichedHeatmap_1.30.0    
+    ## [113] farver_2.1.1               mclust_6.0.0              
+    ## [115] VariantAnnotation_1.46.0   RCurl_1.98-1.12           
+    ## [117] magrittr_2.0.3             Formula_1.2-5             
+    ## [119] GenomeInfoDbData_1.2.10    Rhdf5lib_1.22.0           
+    ## [121] munsell_0.5.0              Rcpp_1.0.10               
+    ## [123] stringi_1.7.12             zlibbioc_1.46.0           
+    ## [125] MASS_7.3-60                plyr_1.8.8                
+    ## [127] bumphunter_1.42.0          minfi_1.46.0              
+    ## [129] parallel_4.3.0             deldir_1.0-9              
+    ## [131] splines_4.3.0              pander_0.6.5              
+    ## [133] multtest_2.56.0            hms_1.1.3                 
+    ## [135] circlize_0.4.15            locfit_1.5-9.7            
+    ## [137] igraph_1.4.3               rngtools_1.5.2            
+    ## [139] biomaRt_2.56.0             futile.options_1.0.1      
+    ## [141] XML_3.99-0.14              evaluate_0.21             
+    ## [143] latticeExtra_0.6-30        biovizBase_1.48.0         
+    ## [145] lambda.r_1.2.4             tzdb_0.4.0                
+    ## [147] foreach_1.5.2              tweenr_2.0.2              
+    ## [149] openssl_2.0.6              polyclip_1.10-4           
+    ## [151] reshape_0.8.9              clue_0.3-64               
+    ## [153] ggforce_0.4.1              broom_1.0.4               
+    ## [155] xtable_1.8-4               restfulr_0.0.15           
+    ## [157] AnnotationFilter_1.24.0    memoise_2.0.1             
+    ## [159] AnnotationDbi_1.62.1       GenomicAlignments_1.36.0  
+    ## [161] cluster_2.1.4              timechange_0.2.0
