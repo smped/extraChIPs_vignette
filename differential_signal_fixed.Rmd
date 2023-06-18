@@ -337,14 +337,7 @@ plotAssayDensities(se, assay = "counts", colour = "treat", trans = "log1p") +
   scale_colour_manual(values = treat_colours)
 ```
 
-An RLE plot also can be informative
-
-```{r plot-rle, fig.cap = "*RLE plot using logCPM values*"}
-plotAssayRle(se, assay = "logCPM", fill = "treat") +
-  scale_fill_manual(values = treat_colours)
-```
-
-Finally a PCA plot can also provide insight as to where the variability in the data lies.
+A PCA plot can also provide insight as to where the variability in the data lies.
 
 ```{r plot-pca, fig.cap = "*PCA plot using logCPM values and showing that replicate variability is larger than varibility between treatment groups.*"}
 plotAssayPCA(se, assay = "logCPM", colour = "treat", label = "sample") +
@@ -559,7 +552,7 @@ As can be seen from the y-limits, although the shape of the peaks is the same,
 the coverage is significantly different.
 We could manually set this to be the same on both tracks
 
-```{r plot-hfgc-ylim, fig.cap = "*The same plot as above, but setting y-axis limits manually*"}
+```{r plot-hfgc-ylim, eval = FALSE, fig.cap = "*The same plot as above, but setting y-axis limits manually*"}
 plotHFGC(gr, coverage = cov_bw, ylim = c(0, 5))
 ```
 
@@ -579,16 +572,14 @@ We can add additional coverage tracks using the same strategy.
 Given we used H3K27ac data in the sliding windows vignette, let's load H3K27ac 
 coverage and add this to our plots.
 
-```{r plot-hfgc-h3k27ac, fig.cap = "*By overlapping tracks, multiple ChIP targets can be shown, here with the addition of H3K27ac coverage*"}
+```{r load-h3k}
 cov_list$H3K27ac <- here::here(
   "data", "H3K27ac", glue("{levels(samples$treatment)}_cov_chr10.bw")
 ) %>% 
   BigWigFileList() %>% 
   setNames(treat_levels)
 cov_colours$H3K27ac <- treat_colours[treat_levels]
-plotHFGC(gr, coverage = cov_list, linecol = cov_colours, rotation.title = 90)
 ```
-
 
 Now let's zoom out and add some cytogenetic bands for reference
 
@@ -642,23 +633,13 @@ We may also wish to add known binding sites for ER as provided by Encode.
 The file `esr1_chr10.hg19.bed.gz` was obtained from the UCSC Table Browser, and 
 this combines ER (i.e. *ESR1*) binding sites for multiple cell lines.
 
-```{r plot-hfgc-esr1, fig.cap = "*Multiple features can be added to a single track. Here ER sites defined by ENCODE are shown in blue*"}
+```{r esr1}
 esr1 <- here("data/ER/esr1_chr10.hg19.bed.gz") %>% 
   import.bed(
     colnames = c("chrom", "start", "end", "name", "score"), seqinfo = sq
   ) %>% 
   keepStandardChromosomes()
-feat_grl$ESR1 <- esr1
-feat_colours <- list(Promoters = "yellow2", ESR1 = "royalblue")
-plotHFGC(
-  gr, 
-  features = feat_grl, featcol = feat_colours,
-  genes = gene_models, genecol = "wheat",
-  coverage = cov_list, linecol = cov_colours, rotation.title = 90,
-  cytobands = grch37.cytobands, zoom = 20
-)
 ```
-
 
 We can separate out these features onto separate tracks using a similar 
 strategy to our coverage tracks.
@@ -668,8 +649,10 @@ separate track.
 Our colours object will now need to be specified as a list with the same 
 structure.
 
-```{r plothfgc-feat-list, fig.cap = "*Features can also be shown on eparate tracks with informative track labels. Plots can also be shifted and multiple parameters are also able to be customised*"}
-feat_list <- list(Promoters = feat_grl["Promoters"], ESR1 = feat_grl["ESR1"])
+```{r plot-hfgc-feat-list, fig.cap = "*Features can also be shown on eparate tracks with informative track labels. Plots can also be shifted and multiple parameters are also able to be customised*"}
+feat_list <- list(
+  Promoters = feat_grl["Promoters"], ESR1 = GRangesList(ESR1 = esr1)
+)
 feat_colours <- list(
   Promoters = c(Promoters = "yellow2"), ESR1 = c(ESR1 = "royalblue")
 )

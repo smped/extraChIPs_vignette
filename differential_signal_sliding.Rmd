@@ -24,7 +24,7 @@ knitr::opts_chunk$set(
 ```
 
 
-## Introduction
+# Introduction
 
 The [GRAVI](https://github.com/smped/GRAVI) workflow, for which this package 
 is designed, uses sliding windows for differential signal analysis using 
@@ -53,9 +53,9 @@ However, when following this workflow across an entire genome, memory
 requirements may exceed those of a standard laptop, and an HPC or 
 high-performance workstation may be required.
 
-## Setup 
+# Setup 
 
-### Installation
+## Installation
 
 In order to use the package `extraChIPs` and follow this vignette, we recommend 
 using the package `BiocManager` (hosted on CRAN) to install all packages.
@@ -97,7 +97,7 @@ theme_set(theme_bw())
 ```
 
 
-### Data
+## Data
 
 All data for this vignette is expected to be in a sub-directory of the working 
 directory named "data" (including "data/H3K27ac"), and all paths will be
@@ -131,9 +131,9 @@ names(treat_colours) <- c(levels(samples$treatment), "Input")
 ```
 
 
-## Differential Signal Analysis
+# Differential Signal Analysis
 
-### Sliding Windows
+## Sliding Windows
 
 The standard approach of tools such as DiffBind [@DiffBind2012] is to take a set
 of peaks, re-centre them, then set all regions to be the same width.
@@ -260,7 +260,7 @@ plotAssayDensities(wincounts, colour = "treatment", trans = "log1p") +
 ```
 
 
-### Filtering of Sliding Windows
+## Filtering of Sliding Windows
 
 After counting all reads in the sliding genomic windows, the next step is to 
 discard windows for which counts are unlikely to represent true signal from our 
@@ -328,7 +328,7 @@ consensus peaks.
 rowRanges(filtcounts)
 ```
 
-### Initial Visualisation
+## Initial Visualisation
 
 Inspecting your data is a common first step, and a common QC step is Relative 
 Log-Expression (RLE) [@Gandolfo2018-oc].
@@ -367,7 +367,7 @@ plotAssayPCA(filtcounts, "logCPM", colour = "treatment", label = "accession") +
   theme_bw()
 ```
 
-### Statistical Testing
+## Statistical Testing
 
 Multiple methods are enabled in the package `extraChIPs` via the function 
 `fitAssayDiff()`, with the possibility of incorporating any additional 
@@ -403,7 +403,7 @@ fit_gr <- fitAssayDiff(filtcounts, design = X, fc = 1.2, asRanges = TRUE)
 ```
 
 
-### Merging Windows
+## Merging Windows
 
 After an analysis has been performed, values contained in the output will
 be estimated signal (`logCPM`), estimated change (`logFC`) with both raw and 
@@ -495,20 +495,7 @@ will be of highly variable width, with this select region of chromosome 10
 producing merged windows ranging from `r min(width(results_gr))`bp to 
 `r max(width(results_gr))/1e3`kb, as may be expected for H3K27ac signal.
 
-```{r plot-width-logcpm, fig.cap="Larger windows tend to be associated with stronger signal. Merged windows which only include 4-5 sliding windows tend to be associated with low H3K27ac signal. Here one window showing changed binding is larger than 10kb and we have been able to detect change somewhere within this range."}
-results_gr %>%
-  mutate(kb = width/1e3) %>% 
-  as_tibble() %>% 
-  mutate(`FDR < 0.05` = hmp_fdr < 0.05) %>% 
-  ggplot(aes(kb, logCPM, colour = `FDR < 0.05`)) +
-  geom_point() +
-  scale_x_log10() +
-  scale_colour_manual(values = c("black", "red")) +
-  labs(x = "Merged Window Size (kb)")
-```
-
-
-### Alternative Normalisation Approaches
+## Alternative Normalisation Approaches
 
 Using Library Size normalisation, as above, is a conservative approach and other
 methods such as RLE [@DESeq22014] or TMM [@Robinson2010-qp] may be appropriate.
@@ -537,7 +524,7 @@ Here, no differences were evident across median values (ANOVA p =
 `r qtest@quantroPvalPerm`) and as such, TMM/RLE normalisation across all 
 samples may be appropriate.
 
-#### TMM Normalisation
+### TMM Normalisation
 
 To perform an analysis using TMM-normalisation, we can simply specify this using 
 the argument `norm = "TMM"` when calling `fitAssayDiff()`
@@ -584,147 +571,13 @@ tmm_gr %>%
   ggtitle("MA Plot: TMM Normalisation")
 ```
 
+If choosing more nuanced normalisation strategies, passing any offset matrices 
+can be simply done using the `offset` argument, which will over-ride any other 
+normalisation settings.
 
-#### GC Bias
+# Mapping of Windows
 
-As GC-bias is a known issue in high-throughput sequencing, additional packages 
-such as `cqn` can also be incorporated in an analytic workflow with `extraChIPs`.
-Firstly, we need to find the GC-content for each of the initial sliding windows.
-The UCSC-derived version of the genome contains this information, but first 
-we'll have to modify the seqinfo objects to ensure we're able to obtain data 
-from the correct location.
-
-```{r get-gc}
-hg19 <- BSgenome.Hsapiens.UCSC.hg19
-sq_hg19 <- seqinfo(hg19) 
-ranges_hg19 <- rowRanges(filtcounts) %>% 
-  keepStandardChromosomes() %>% 
-  sortSeqlevels()
-seqlevels(ranges_hg19) <- seqlevels(sq_hg19)
-seqinfo(ranges_hg19) <- sq_hg19
-gc <- getSeq(hg19, ranges_hg19) %>% 
-  letterFrequency(letters = "GC", as.prob = TRUE)
-rowData(filtcounts)$gc <- gc[,1]
-```
-
-Now we've obtained this information, we can check for any bias in our data by 
-plotting logFC estimates as a function of GC content for the complete set of 
-sliding windows.
-For our data, minimal bias is evident, with a possible, but slight, downwards 
-bias in the low-GC windows when using Library-Size normalisation only.
-
-```{r gc-bias, fig.cap = "GC-Content Vs estimated logFC when using A) library-size normalisation and B) TMM normalisation"}
-A <- fit_gr %>% 
-  mutate(gc = gc[,1]) %>% 
-  as_tibble() %>% 
-  ggplot(aes(gc, logFC)) +
-  geom_point() +
-  geom_smooth(se = FALSE) +
-  scale_x_continuous(name = "GC Content", labels = percent) +
-  ggtitle("GC-Bias: Library Size Normalisation")
-B <- tmm_gr %>% 
-  mutate(gc = gc[,1]) %>% 
-  as_tibble() %>% 
-  ggplot(aes(gc, logFC)) +
-  geom_point() +
-  geom_smooth(se = FALSE) +
-  scale_x_continuous(name = "GC Content", labels = percent) +
-  ggtitle("GC-Bias: TMM Normalisation")
-A + B + plot_annotation(tag_levels = "A")
-```
-
-If we're concerned about bias in our data, we can use an approach like 
-Conditional-Quantile normalisation [@Hansen2012-jz] to correct for this, using 
-fixed-length windows whilst still incorporating any GC bias.
-We can also store the normalised logCPM values as a new assay.
-
-```{r cqn, fig.cap = "Systemic impacts of GC content across all samples. A clear bias is evident through the middle range of the data, with a degree of variability again seen in the high-GC and low-GC windows."}
-cqn <- cqn(
-  counts = assay(filtcounts, "counts"), 
-  x = rowData(filtcounts)$gc, sizeFactors = filtcounts$totals,
-  lengths = width(filtcounts), lengthMethod = "fixed"
-)
-assay(filtcounts, "norm_logCPM") <- cqn$y + cqn$offset
-cqnplot(
-  cqn, 
-  col = treat_colours[as.character(filtcounts$treatment)], 
-  xlab = "GC Content"
-)
-```
-
-We can check the impact of normalisation using PCA.
-
-```{r plot-cqn-pca, fig.cap = "PCA plot of CQ-Normalised logCPM values"}
-plotAssayPCA(
-  filtcounts, assay = "norm_logCPM", colour = "treatment", label = "accession"
-) +
-  scale_colour_manual(values = treat_colours) +
-  theme_bw()
-```
-
-The function `cqn()` also returns a matrix of offsets able to supplied to a 
-`DGEList`, and these can also be passed via `plotAssayDiff()`.
-As these offsets are use for normalisation, no other method is required.
-
-```{r fit-cqn}
-cqn_gr <- fitAssayDiff(
-  filtcounts, design = X, fc = 1.2, offset = cqn$glm.offset, asRanges = TRUE
-)
-cqn_results <- mergeByHMP(cqn_gr, inc_cols = "overlaps_ref", merge_within = 120)
-```
-
-This approach has returned fewer results, with only `r sum(cqn_results$hmp_fdr < 0.05)` 
-merged windows being considered significant, when accounting for GC-bias, 
-however this is likely to reflect a more accurate set of results, particularly 
-if setting `fc = 0` as a less stringent hypothesis test.
-
-Again we can check for bias using an MA plot, along with the GC-bias plot
-
-```{r plot-bias-cqn, fig.cap = "QC plots for results using CQN, including an A) MA-plot and B) GC-bias plot. The minimal bias oberserved previously for low-GC regions appears to have been rectified, however, higher GC regions appear less satisfactory in this dataset."}
-A <- cqn_gr %>% 
-  as_tibble() %>% 
-  ggplot(aes(logCPM, logFC)) +
-  geom_point(alpha = 0.6) +
-  geom_smooth(se = FALSE) +
-  ylim(range(fit_gr$logFC)) +
-  ggtitle("MA Plot: All Sliding Windows (CQN)")
-B <- cqn_gr %>% 
-  as_tibble() %>% 
-  ggplot(aes(gc, logFC)) +
-  geom_point() +
-  geom_smooth(se = FALSE) +
-  scale_x_continuous(name = "GC Content", labels = percent) +
-  ggtitle("GC-Bias: CQ Normalisation")
-A + B + plot_annotation(tag_levels = "A")
-```
-
-Results can be compared to any of the previous approaches, and it appears that 
-using CQN has led to slightly more conservative estimates of fold-change.
-
-```{r compare-logfc-tmm-cqn, fig.cap = "Comparison of logFC estimates obtained using TMM and CQ normalisation. The black line represents y = x, whilst the regression line is shown in blue. A slight downwards bias was evident in CQN-derived estimates."}
-tibble(TMM = tmm_gr$logFC, CQN = cqn_gr$logFC) %>% 
-  ggplot(aes(TMM, CQN)) +
-  geom_point(alpha = 0.6) +
-  geom_abline() +
-  geom_smooth(se = FALSE, method = "lm")
-```
-
-As a further alternative, we could fit the CQ-normalised logCPM values using 
-`limma-trend`, by passing this assay and setting `method = "lt"`.
-However, Quasi-likelihood models are generally preferred.
-
-```{r cqn-lt}
-cqn_lt_gr <- fitAssayDiff(
-  filtcounts, assay = "norm_logCPM", design = X, fc = 1.2, 
-  method = "lt", asRanges = TRUE
-)
-cqn_lt_results <- mergeByHMP(cqn_lt_gr, inc_cols = "overlaps_ref", merge_within = 120)
-```
-
-
-## Mapping of Windows
-
-### Mapping to Genes
+## Mapping to Genes
 
 Once the changes in signal for our given ChIP target have been determined, a 
 common next step is to assess which genes are likely to be impacted.
@@ -861,7 +714,7 @@ tmm_results %>%
 
 
 
-### Mapping to Regions
+## Mapping to Regions
 
 In addition to which gene is likely to be directly impacted by the detected 
 signal, knowing which type of regulatory region signal was observed in is 
@@ -919,9 +772,9 @@ tmm_results %>% filter(hmp_fdr < 0.05, bestOverlap == "promoter")
 ```
 
 
-## Visualisation of Results
+# Visualisation of Results
 
-### Pie Charts
+## Pie Charts
 
 Now that we've assigned each window to a genomic regions, we can use `plotPie()`
 to view the distribution of ChIP-Seq signal within these regions.
@@ -964,7 +817,7 @@ plotPie(
   scale_fill_manual(values = region_colours)
 ```
 
-### Split Donut Charts
+## Split Donut Charts
 
 Pie charts can be further extended into Split-Donut charts, with data in two rings.
 The default settings can be used to add the status of each window to the 
@@ -1001,7 +854,7 @@ plotSplitDonut(
 ```
 
 
-### Coverage Plots
+## Coverage Plots
 
 In order to show our changed signal in context we can show the coverage using a
 `BigWigFileList` and the function `plotHFGC()`, which stands for plot **H**iC, 
@@ -1062,7 +915,7 @@ plotHFGC(
 )
 ```
 
-#### Displaying Genes
+### Displaying Genes
 
 Next we might like to add gene models to provide the regulatory context.
 These are supplied here in the layout required by the defaults of the 
@@ -1087,7 +940,7 @@ plotHFGC(
 )
 ```
 
-#### Adding Features
+### Adding Features
 
 Another useful track to add might be some key features such as promoters and 
 other annotated regions, as we have formd earlier in the workflow.
@@ -1107,7 +960,7 @@ plotHFGC(
 ```
 
 
-#### Adding Annotations To Coverage
+### Adding Annotations To Coverage
 
 An indication of which regions are associated with increased or decreased 
 ChIP signal can also be a useful annotation to add to plots such as the above.
@@ -1163,12 +1016,12 @@ GenomicInteractions object, completing all available options for the HFGC
 components.
 
 
-## References
+# References
 
 <div id="refs"></div>
 <br>
 
-## Session Info
+# Session Info
 
 ```{r session-info}
 sessionInfo()

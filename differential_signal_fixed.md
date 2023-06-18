@@ -437,22 +437,8 @@ alt="Count densities for all samples, using the log+1 transformation" />
 using the log+1 transformation</em></figcaption>
 </figure>
 
-An RLE plot also can be informative
-
-``` r
-plotAssayRle(se, assay = "logCPM", fill = "treat") +
-  scale_fill_manual(values = treat_colours)
-```
-
-<figure>
-<img src="differential_signal_fixed_files/figure-gfm/plot-rle-1.png"
-alt="RLE plot using logCPM values" />
-<figcaption aria-hidden="true"><em>RLE plot using logCPM
-values</em></figcaption>
-</figure>
-
-Finally a PCA plot can also provide insight as to where the variability
-in the data lies.
+A PCA plot can also provide insight as to where the variability in the
+data lies.
 
 ``` r
 plotAssayPCA(se, assay = "logCPM", colour = "treat", label = "sample") +
@@ -848,14 +834,6 @@ this to be the same on both tracks
 plotHFGC(gr, coverage = cov_bw, ylim = c(0, 5))
 ```
 
-<figure>
-<img
-src="differential_signal_fixed_files/figure-gfm/plot-hfgc-ylim-1.png"
-alt="The same plot as above, but setting y-axis limits manually" />
-<figcaption aria-hidden="true"><em>The same plot as above, but setting
-y-axis limits manually</em></figcaption>
-</figure>
-
 An alternative may be to plot both treatments on the same track. By
 default, if a BigWigFileList is passed to `plotHFGC()` each BigWig file
 will be drawn on a separate track. To overlap the tracks, we can pass a
@@ -887,17 +865,7 @@ cov_list$H3K27ac <- here::here(
   BigWigFileList() %>% 
   setNames(treat_levels)
 cov_colours$H3K27ac <- treat_colours[treat_levels]
-plotHFGC(gr, coverage = cov_list, linecol = cov_colours, rotation.title = 90)
 ```
-
-<figure>
-<img
-src="differential_signal_fixed_files/figure-gfm/plot-hfgc-h3k27ac-1.png"
-alt="By overlapping tracks, multiple ChIP targets can be shown, here with the addition of H3K27ac coverage" />
-<figcaption aria-hidden="true"><em>By overlapping tracks, multiple ChIP
-targets can be shown, here with the addition of H3K27ac
-coverage</em></figcaption>
-</figure>
 
 Now let’s zoom out and add some cytogenetic bands for reference
 
@@ -986,25 +954,7 @@ esr1 <- here("data/ER/esr1_chr10.hg19.bed.gz") %>%
     colnames = c("chrom", "start", "end", "name", "score"), seqinfo = sq
   ) %>% 
   keepStandardChromosomes()
-feat_grl$ESR1 <- esr1
-feat_colours <- list(Promoters = "yellow2", ESR1 = "royalblue")
-plotHFGC(
-  gr, 
-  features = feat_grl, featcol = feat_colours,
-  genes = gene_models, genecol = "wheat",
-  coverage = cov_list, linecol = cov_colours, rotation.title = 90,
-  cytobands = grch37.cytobands, zoom = 20
-)
 ```
-
-<figure>
-<img
-src="differential_signal_fixed_files/figure-gfm/plot-hfgc-esr1-1.png"
-alt="Multiple features can be added to a single track. Here ER sites defined by ENCODE are shown in blue" />
-<figcaption aria-hidden="true"><em>Multiple features can be added to a
-single track. Here ER sites defined by ENCODE are shown in
-blue</em></figcaption>
-</figure>
 
 We can separate out these features onto separate tracks using a similar
 strategy to our coverage tracks. If we pass a GRangesList, all features
@@ -1014,7 +964,9 @@ track. Our colours object will now need to be specified as a list with
 the same structure.
 
 ``` r
-feat_list <- list(Promoters = feat_grl["Promoters"], ESR1 = feat_grl["ESR1"])
+feat_list <- list(
+  Promoters = feat_grl["Promoters"], ESR1 = GRangesList(ESR1 = esr1)
+)
 feat_colours <- list(
   Promoters = c(Promoters = "yellow2"), ESR1 = c(ESR1 = "royalblue")
 )
@@ -1030,7 +982,7 @@ plotHFGC(
 
 <figure>
 <img
-src="differential_signal_fixed_files/figure-gfm/plothfgc-feat-list-1.png"
+src="differential_signal_fixed_files/figure-gfm/plot-hfgc-feat-list-1.png"
 alt="Features can also be shown on eparate tracks with informative track labels. Plots can also be shifted and multiple parameters are also able to be customised" />
 <figcaption aria-hidden="true"><em>Features can also be shown on eparate
 tracks with informative track labels. Plots can also be shifted and
