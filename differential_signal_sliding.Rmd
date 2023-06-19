@@ -92,7 +92,6 @@ library(magrittr)
 library(quantro)
 library(cqn)
 library(ggrepel)
-library(BSgenome.Hsapiens.UCSC.hg19)
 theme_set(theme_bw())
 ```
 
@@ -160,7 +159,9 @@ bfl <- here("data", "H3K27ac", glue("{accessions}.bam")) %>%
   BamFileList() %>% 
   setNames(str_remove_all(names(.), ".bam"))
 file.exists(path(bfl))
-sq <- seqinfo(bfl)
+sq <- seqinfo(bfl) %>% 
+  sortSeqlevels() %>% 
+  keepStandardChromosomes()
 isCircular(sq) <- rep(FALSE, length(seqlevels(sq)))
 genome(sq) <- "GRCh37"
 ```
@@ -311,15 +312,6 @@ dim(filtcounts)
 assays(filtcounts)
 ```
 
-We can once again check our signal distributions, this time on the logCPM 
-values.
-
-```{r plotcpm, fig.cap = "*Densities for logCPM values across all samples after discarding windows less likely to contain H3K27ac signal using `dualFilter()`*"}
-plotAssayDensities(filtcounts, assay = "logCPM", colour = "treatment") +
-  scale_colour_manual(values = treat_colours) +
-  theme_bw()
-```
-
 The `rowData` element of the returned object will contain a logical column 
 indicating where each specific retained window overlapped one of the supplied 
 consensus peaks.
@@ -328,10 +320,28 @@ consensus peaks.
 rowRanges(filtcounts)
 ```
 
+
 ## Initial Visualisation
 
-Inspecting your data is a common first step, and a common QC step is Relative 
-Log-Expression (RLE) [@Gandolfo2018-oc].
+We can once again check our signal distributions, this time on the logCPM 
+values.
+We can also check the samples using a PCA plot, again colouring the points by 
+treatment group and adding labels, which will repel by default if the points are 
+shown.
+
+```{r plot-density-pca, fig.width=10, fig.cap = "*A) Densities for logCPM values across all samples after discarding windows less likely to contain H3K27ac signal using `dualFilter()` B) PCA plot based on the logCPM assay*"}
+A <- plotAssayDensities(filtcounts, assay = "logCPM", colour = "treatment") +
+  scale_colour_manual(values = treat_colours) +
+  theme_bw()
+B <- plotAssayPCA(filtcounts, "logCPM", colour = "treatment", label = "accession") +
+  scale_colour_manual(values = treat_colours) +
+  theme_bw()
+A + B + 
+  plot_layout(guides = "collect") + plot_annotation(tag_levels = "A")
+```
+
+
+Another common QC step is Relative Log-Expression (RLE) [@Gandolfo2018-oc].
 In the following, we first inspect the RLE across the entire dataset, followed 
 by RLE grouping *within treatments*.
 This can be particularly useful when distributions vary significantly between 
@@ -340,7 +350,7 @@ given ChIP target.
 Here, however, there is minimal difference between the two approaches as H3K27ac 
 signal tends to be broadly consistent between these treatment groups.
 
-```{r plot-assay-rle, fig.height=7, fig.cap = "*RLE plots (A) across all samples and (B) with values calculated within treatment groups.*"}
+```{r plot-assay-rle, fig.width=10, fig.cap = "*RLE plots (A) across all samples and (B) with values calculated within treatment groups.*"}
 a <- plotAssayRle(filtcounts, assay = "logCPM", fill = "treat") +
   geom_hline(yintercept = 0, linetype = 2, colour = "grey") +
   scale_fill_manual(values = treat_colours) +
@@ -357,15 +367,6 @@ a + b + plot_layout(guides = "collect") +
   plot_annotation(tag_levels = "A")
 ```
 
-We can also check the samples using a PCA plot, again colouring the points by 
-treatment group and adding labels, which will repel by default if the points are 
-shown.
-
-```{r plot-pca, fig.height=6, fig.width=8, fig.cap = "*PCA plot based on the logCPM assay*"}
-plotAssayPCA(filtcounts, "logCPM", colour = "treatment", label = "accession") +
-  scale_colour_manual(values = treat_colours) +
-  theme_bw()
-```
 
 ## Statistical Testing
 
@@ -445,7 +446,7 @@ complete set of sliding windows and the final set of merged windows.
 Any bias present in our data will be visible when using the sliding windows, 
 whilst our final results can be inspected using the merged windows.
 
-```{r plot-ma-libsize, fig.cap = "MA Plots using A) all sliding windows (after filtering before merging) and B) the final set of merged windows. The most highly ranked merged window is also labelled in the set of merged windows. Blue lines represent a loess curve through the data."}
+```{r plot-ma-libsize, fig.width=10, fig.cap = "MA Plots using A) all sliding windows (after filtering before merging) and B) the final set of merged windows. The most highly ranked merged window is also labelled in the set of merged windows. Blue lines represent a loess curve through the data."}
 A <- fit_gr %>% 
   as_tibble() %>% 
   ggplot(aes(logCPM, logFC)) +
@@ -780,11 +781,9 @@ Now that we've assigned each window to a genomic regions, we can use `plotPie()`
 to view the distribution of ChIP-Seq signal within these regions.
 First we'll define a consistent colour palette for these regions in all plots.
 
-```{r plot-pie-generic, fig.cap = "Pie chart showing the distribution of ChIP-Seq signal within our defined genomic regions."}
+```{r plot-pie-generic}
 region_colours <- hcl.colors(length(regions), "Viridis", rev = TRUE)
 names(region_colours) <- names(regions)
-plotPie(tmm_results, fill = "bestOverlap") +
-  scale_fill_manual(values = region_colours)
 ```
 
 Labels produced using `plotPie()` use the `glue()` syntax and are able to access 
@@ -795,11 +794,17 @@ respectively as these are columns within the internal `data.frame` formed when
 creating the plot.
 External formatting functions such as `comma()`, `percent()` or `str_to_title()` 
 can also be put to good use here.
+In the label `"{str_to_title(.data[[fill]])}\n{n}\n({percent(p, 0.1)})"`, 
+the first braces take the values from the bestOverlap (i.e. fill) column and 
+format them using `str_to_title()`.
+The second braces take the category counts using the value `n` and the third 
+braces format the proportions `p` as percentages.
+Each set of braces is separated by a line break using `\n`
 
 ```{r plot-pie-labels, fig.cap = "Pie chart showing customised labels. Here the regions have been modified to use title case in the labels, but without modifying the underlying data."}
 plotPie(
-  tmm_results, fill = "bestOverlap",
-  cat_glue = "{str_to_title(.data[[fill]])}\n{comma(n, 1)}\n({percent(p, 0.1)})"
+  tmm_results, fill = "bestOverlap", min_p = 0.05,
+  cat_glue = "{str_to_title(.data[[fill]])}\n{n}\n({percent(p, 0.1)})"
 ) +
   scale_fill_manual(values = region_colours)
 ```
@@ -819,7 +824,8 @@ plotPie(
 
 ## Split Donut Charts
 
-Pie charts can be further extended into Split-Donut charts, with data in two rings.
+Pie charts can be further extended into Split-Donut charts, with data in two 
+rings.
 The default settings can be used to add the status of each window to the 
 overlapping regions.
 
@@ -831,16 +837,9 @@ plotSplitDonut(
 ```
 
 A key advantage of `plotSplitDonut()` is the ability to provide separate colour 
-palettes for the inner & outer rings
-
-```{r plot-donut-both-palettes, fig.cap = "Split-Donut chart using separate colour palettes for inner and outer rings"}
-plotSplitDonut(
-  tmm_results, inner = "bestOverlap", outer = "status", 
-  inner_palette = region_colours, outer_palette = status_colours
-)
-```
-
-Once again these are heavily customisable using the `glue()` syntax for labels and exploding key segments of interest.
+palettes for the inner & outer rings.
+Once again these are heavily customisable using the `glue()` syntax for labels 
+and exploding key segments of interest.
 
 ```{r plot-donut-customised, fig.cap = "Split-Donut chart exploding key regions and customising labels."}
 plotSplitDonut(
@@ -888,25 +887,31 @@ head(grch37.cytobands)
 
 Let's check the coverage across the most highly-ranked region with default 
 settings.
-By default, the specified range will be outlined (i.e. highlighted) with a 
-blue rectangle which is able to be turned off and customised as the user sees 
-fit.
 
-
-```{r plot-hfgc-init, fig.cap = "Generic figure from plotHFGC showing coverage for the selected region only"}
+```{r set-gr}
 gr <- filter(tmm_results, hmp_fdr < 0.05, bestOverlap == "promoter")[1]
-gr <- keepStandardChromosomes(gr)
+```
+
+
+The most important option to consider when showing coverage is whether to 
+display tracks individually or as overlapping tracks.
+Passing a BigWigFileList will plot each file on a separate track by default, 
+with y-axis limits able to be specified as consistent across all tracks.
+Alternatively, by passing the coverage as a list of BigWigFileList objects, 
+each list element will be drawn as a single track with coverage overlaid.
+For one or more overlaid tracks, colours will need to now be provided in a list 
+with matching structure.
+
+The code for separate tracks would be: (not shown)
+
+```{r plot-hfgc-init, eval=FALSE}
 plotHFGC(gr, cytobands = grch37.cytobands, coverage = bwfl)
 ```
 
-The y-axes for the two treatments are clearly different and we can use the same 
-colour scheme as previously.
-We can overlap the two treatments by providing the coverage as a list of 
-`BigWigFileList` objects.
-Colours will need to now be provided in a list with matching structure.
-Zooming out may also give a little better context
+Overlaying coverage onto a single track can instead be highly informative and 
+enables the visualisation of multiple ChIP targets
 
-```{r plot-hfgc-cov, fig.cap = "Zoomed out version of the above with coverage plots set to overlap"}
+```{r plot-hfgc-cov, fig.cap = "Zoomed out version of the above region with coverage plots set to overlap"}
 cov_list <- list(H3K27ac = bwfl)
 cov_colour <- list(H3K27ac = treat_colours[levels(samples$treatment)])
 plotHFGC(
@@ -915,21 +920,27 @@ plotHFGC(
 )
 ```
 
+By default, the specified range will also be outlined (i.e. highlighted) with a 
+blue rectangle which is able to be turned off and customised as the user sees 
+fit.
+
 ### Displaying Genes
 
 Next we might like to add gene models to provide the regulatory context.
-These are supplied here in the layout required by the defaults of the 
-`GeneRegionTrack()` function, with all exons and transcripts annotated.
+We'll use the exons element of our `gencode` object to create the format used 
+by the defaults of the `GeneRegionTrack()` function, with all exons and 
+transcripts annotated.
 
 ```{r load-gene-models}
 gene_models <- gencode$exon %>% 
   select(
     type, gene = gene_id, exon = exon_id, transcript = transcript_id, 
     symbol = gene_name
-  ) %>% 
-  keepStandardChromosomes()
+  )
 ```
 
+Now we can add this to our plot, manually ensuring that all transcripts are 
+shown (`collapseTranscripts = FALSE`)
 
 ```{r plot-hfgc-with-genes, fig.cap = "*Coverage for our region showing the relationship of signal to annotated genes*"}
 plotHFGC(
@@ -943,29 +954,17 @@ plotHFGC(
 ### Adding Features
 
 Another useful track to add might be some key features such as promoters and 
-other annotated regions, as we have formd earlier in the workflow.
+other annotated regions, as we have formed earlier in the workflow.
 Features must **always** be a `GRangesList`, with each element defining a 
-different type of feature, as we already have in our `regions_gr` object.
+different type of feature, as we already have in our `regions` object.
 For multiple feature tracks, a list of `GRangesList` objects can be passed.
-
-```{r plot-hfgc-with-regions, fig.cap = "*The same figure as previously, but with annotated regions added as features. Any type of feature can be added here.*"}
-regions <- keepStandardChromosomes(regions)
-plotHFGC(
-  gr, cytobands = grch37.cytobands, 
-  features = regions, featcol = region_colours, featstack = "dense",
-  coverage =  cov_list, linecol = cov_colour,
-  genes = gene_models, genecol = "wheat", collapseTranscripts = FALSE,
-  zoom = 50, rotation.title = 90, covsize = 10, genesize = 1, featsize = 5
-)
-```
-
 
 ### Adding Annotations To Coverage
 
 An indication of which regions are associated with increased or decreased 
 ChIP signal can also be a useful annotation to add to plots such as the above.
 Using the status from our differential signal testing, we can create a 
-`GRangesList` with te various regions annotated as Increased, Unchanged etc,
+`GRangesList` with the various regions annotated as Increased, Unchanged etc,
 
 Similar to the features track, where the names of `GRangesList` elements denote
 the different feature types, able to then assigned a colour, coverage annotation
@@ -990,9 +989,9 @@ All merged windows for which a differential signal test was performed will be
 annotated with colours indicating the result for that window.
 As can be seen multiple H3K27ac signal regions appear to be responding to DHT 
 treatment for *KAT6B*  with a possible intronic enhancer and alternative 
-promoter being most likely impacted, including the neghbouring region to our 
+promoter being most likely impacted, including the neighbouring region to our 
 initial range.
-In contradst, the primary promoter appears unaffected by DHT treatment.
+In contrast, the primary promoter appears unaffected by DHT treatment.
 
 ```{r plot-hfgc-with-annot, fig.cap = "*The addition of an annotation track for the coverage tracks shows which regions were retained during the analysis, as well as those which were considered as showing changed or unchanged signal.*"}
 plotHFGC(
@@ -1015,15 +1014,16 @@ If long-range interactions are available, these can also be provided as a
 GenomicInteractions object, completing all available options for the HFGC 
 components.
 
+# Session Info
+
+```{r session-info}
+sessionInfo()
+```
+
 
 # References
 
 <div id="refs"></div>
 <br>
 
-# Session Info
-
-```{r session-info}
-sessionInfo()
-```
 

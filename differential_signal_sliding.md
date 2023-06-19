@@ -69,7 +69,6 @@ library(magrittr)
 library(quantro)
 library(cqn)
 library(ggrepel)
-library(BSgenome.Hsapiens.UCSC.hg19)
 theme_set(theme_bw())
 ```
 
@@ -139,7 +138,9 @@ file.exists(path(bfl))
     ## [1] TRUE TRUE TRUE TRUE TRUE TRUE TRUE
 
 ``` r
-sq <- seqinfo(bfl)
+sq <- seqinfo(bfl) %>% 
+  sortSeqlevels() %>% 
+  keepStandardChromosomes()
 isCircular(sq) <- rep(FALSE, length(seqlevels(sq)))
 genome(sq) <- "GRCh37"
 ```
@@ -222,7 +223,7 @@ rowRanges(wincounts)
     ##   [506537]    chr10 99999761-99999880      *
     ##   [506538]    chr10 99999801-99999920      *
     ##   -------
-    ##   seqinfo: 84 sequences from GRCh37 genome
+    ##   seqinfo: 25 sequences from GRCh37 genome
 
 We can also add some key information to the `colData` element of this
 object, which will also be propagated to all downstream objects.
@@ -341,23 +342,6 @@ assays(filtcounts)
     ## List of length 2
     ## names(2): counts logCPM
 
-We can once again check our signal distributions, this time on the
-logCPM values.
-
-``` r
-plotAssayDensities(filtcounts, assay = "logCPM", colour = "treatment") +
-  scale_colour_manual(values = treat_colours) +
-  theme_bw()
-```
-
-<figure>
-<img src="differential_signal_sliding_files/figure-gfm/plotcpm-1.png"
-alt="Densities for logCPM values across all samples after discarding windows less likely to contain H3K27ac signal using dualFilter()" />
-<figcaption aria-hidden="true"><em>Densities for logCPM values across
-all samples after discarding windows less likely to contain H3K27ac
-signal using <code>dualFilter()</code></em></figcaption>
-</figure>
-
 The `rowData` element of the returned object will contain a logical
 column indicating where each specific retained window overlapped one of
 the supplied consensus peaks.
@@ -381,19 +365,44 @@ rowRanges(filtcounts)
     ##   [23416]    chr10 99895241-99895360      * |         TRUE
     ##   [23417]    chr10 99895281-99895400      * |         TRUE
     ##   -------
-    ##   seqinfo: 84 sequences from GRCh37 genome
+    ##   seqinfo: 25 sequences from GRCh37 genome
 
 ## Initial Visualisation
 
-Inspecting your data is a common first step, and a common QC step is
-Relative Log-Expression (RLE) (Gandolfo and Speed 2018). In the
-following, we first inspect the RLE across the entire dataset, followed
-by RLE grouping *within treatments*. This can be particularly useful
-when distributions vary significantly between treatment groups, such as
-may occur with a cytoplasmic to nuclear shift by a given ChIP target.
-Here, however, there is minimal difference between the two approaches as
-H3K27ac signal tends to be broadly consistent between these treatment
-groups.
+We can once again check our signal distributions, this time on the
+logCPM values. We can also check the samples using a PCA plot, again
+colouring the points by treatment group and adding labels, which will
+repel by default if the points are shown.
+
+``` r
+A <- plotAssayDensities(filtcounts, assay = "logCPM", colour = "treatment") +
+  scale_colour_manual(values = treat_colours) +
+  theme_bw()
+B <- plotAssayPCA(filtcounts, "logCPM", colour = "treatment", label = "accession") +
+  scale_colour_manual(values = treat_colours) +
+  theme_bw()
+A + B + 
+  plot_layout(guides = "collect") + plot_annotation(tag_levels = "A")
+```
+
+<figure>
+<img
+src="differential_signal_sliding_files/figure-gfm/plot-density-pca-1.png"
+alt="A) Densities for logCPM values across all samples after discarding windows less likely to contain H3K27ac signal using dualFilter() B) PCA plot based on the logCPM assay" />
+<figcaption aria-hidden="true"><em>A) Densities for logCPM values across
+all samples after discarding windows less likely to contain H3K27ac
+signal using <code>dualFilter()</code> B) PCA plot based on the logCPM
+assay</em></figcaption>
+</figure>
+
+Another common QC step is Relative Log-Expression (RLE) (Gandolfo and
+Speed 2018). In the following, we first inspect the RLE across the
+entire dataset, followed by RLE grouping *within treatments*. This can
+be particularly useful when distributions vary significantly between
+treatment groups, such as may occur with a cytoplasmic to nuclear shift
+by a given ChIP target. Here, however, there is minimal difference
+between the two approaches as H3K27ac signal tends to be broadly
+consistent between these treatment groups.
 
 ``` r
 a <- plotAssayRle(filtcounts, assay = "logCPM", fill = "treat") +
@@ -418,23 +427,6 @@ src="differential_signal_sliding_files/figure-gfm/plot-assay-rle-1.png"
 alt="RLE plots (A) across all samples and (B) with values calculated within treatment groups." />
 <figcaption aria-hidden="true"><em>RLE plots (A) across all samples and
 (B) with values calculated within treatment groups.</em></figcaption>
-</figure>
-
-We can also check the samples using a PCA plot, again colouring the
-points by treatment group and adding labels, which will repel by default
-if the points are shown.
-
-``` r
-plotAssayPCA(filtcounts, "logCPM", colour = "treatment", label = "accession") +
-  scale_colour_manual(values = treat_colours) +
-  theme_bw()
-```
-
-<figure>
-<img src="differential_signal_sliding_files/figure-gfm/plot-pca-1.png"
-alt="PCA plot based on the logCPM assay" />
-<figcaption aria-hidden="true"><em>PCA plot based on the logCPM
-assay</em></figcaption>
 </figure>
 
 ## Statistical Testing
@@ -528,7 +520,7 @@ arrange(results_gr, hmp)[1:5]
     ##   [4] 1.06330e-04     Increased
     ##   [5] 1.36100e-04     Increased
     ##   -------
-    ##   seqinfo: 84 sequences from GRCh37 genome
+    ##   seqinfo: 25 sequences from GRCh37 genome
 
 In the above, we returned 19 ranges which we might consider using the
 significance threshold $\alpha$ = 0.05. As is common, we can assess our
@@ -789,7 +781,7 @@ subset(tss, vapply(gene_name, function(x) "PPIF" %in% x, logical(1)))
     ##   [2]                   PPIF-204
     ##   [3]                   PPIF-202
     ##   -------
-    ##   seqinfo: 84 sequences from GRCh37 genome
+    ##   seqinfo: 25 sequences from GRCh37 genome
 
 We can also add the TSS overlap status to our set of results
 
@@ -842,7 +834,7 @@ tail(promoters)
     ##   [5]            CRTAC1-201
     ##   [6] CRTAC1-203,CRTAC1-202
     ##   -------
-    ##   seqinfo: 84 sequences from GRCh37 genome
+    ##   seqinfo: 25 sequences from GRCh37 genome
 
 ``` r
 tmm_results <- mapByFeature(
@@ -893,7 +885,7 @@ tmm_results %>% filter(hmp_fdr < 0.05) %>% arrange(hmp)
     ##   [20]   0.0386278   Increased     FALSE ENSG00000150347.17_12          ARID5B
     ##   [21]   0.0492121   Increased     FALSE  ENSG00000166321.14_7          NUDT13
     ##   -------
-    ##   seqinfo: 84 sequences from GRCh37 genome
+    ##   seqinfo: 25 sequences from GRCh37 genome
 
 So now we have our regions showing differential signal, along with which
 gene they are most likely to be impacting, and whether they directly
@@ -1010,7 +1002,7 @@ tmm_results %>% filter(hmp_fdr < 0.05, bestOverlap == "promoter")
     ##   [1]    promoter
     ##   [2]    promoter
     ##   -------
-    ##   seqinfo: 84 sequences from GRCh37 genome
+    ##   seqinfo: 25 sequences from GRCh37 genome
 
 # Visualisation of Results
 
@@ -1024,17 +1016,7 @@ regions in all plots.
 ``` r
 region_colours <- hcl.colors(length(regions), "Viridis", rev = TRUE)
 names(region_colours) <- names(regions)
-plotPie(tmm_results, fill = "bestOverlap") +
-  scale_fill_manual(values = region_colours)
 ```
-
-<figure>
-<img
-src="differential_signal_sliding_files/figure-gfm/plot-pie-generic-1.png"
-alt="Pie chart showing the distribution of ChIP-Seq signal within our defined genomic regions." />
-<figcaption aria-hidden="true">Pie chart showing the distribution of
-ChIP-Seq signal within our defined genomic regions.</figcaption>
-</figure>
 
 Labels produced using `plotPie()` use the `glue()` syntax and are able
 to access the summarised data using `N` as the overall total number of
@@ -1043,12 +1025,18 @@ to fill the pie segments. Totals and percentages within each segment are
 accessible using `n` and `p` respectively as these are columns within
 the internal `data.frame` formed when creating the plot. External
 formatting functions such as `comma()`, `percent()` or `str_to_title()`
-can also be put to good use here.
+can also be put to good use here. In the label
+`"{str_to_title(.data[[fill]])}\n{n}\n({percent(p, 0.1)})"`, the first
+braces take the values from the bestOverlap (i.e. fill) column and
+format them using `str_to_title()`. The second braces take the category
+counts using the value `n` and the third braces format the proportions
+`p` as percentages. Each set of braces is separated by a line break
+using `\n`
 
 ``` r
 plotPie(
-  tmm_results, fill = "bestOverlap",
-  cat_glue = "{str_to_title(.data[[fill]])}\n{comma(n, 1)}\n({percent(p, 0.1)})"
+  tmm_results, fill = "bestOverlap", min_p = 0.05,
+  cat_glue = "{str_to_title(.data[[fill]])}\n{n}\n({percent(p, 0.1)})"
 ) +
   scale_fill_manual(values = region_colours)
 ```
@@ -1106,25 +1094,9 @@ overlapping region</figcaption>
 </figure>
 
 A key advantage of `plotSplitDonut()` is the ability to provide separate
-colour palettes for the inner & outer rings
-
-``` r
-plotSplitDonut(
-  tmm_results, inner = "bestOverlap", outer = "status", 
-  inner_palette = region_colours, outer_palette = status_colours
-)
-```
-
-<figure>
-<img
-src="differential_signal_sliding_files/figure-gfm/plot-donut-both-palettes-1.png"
-alt="Split-Donut chart using separate colour palettes for inner and outer rings" />
-<figcaption aria-hidden="true">Split-Donut chart using separate colour
-palettes for inner and outer rings</figcaption>
-</figure>
-
-Once again these are heavily customisable using the `glue()` syntax for
-labels and exploding key segments of interest.
+colour palettes for the inner & outer rings. Once again these are
+heavily customisable using the `glue()` syntax for labels and exploding
+key segments of interest.
 
 ``` r
 plotSplitDonut(
@@ -1187,29 +1159,29 @@ head(grch37.cytobands)
     ## 6  chr1   12700000 16200000 p36.21   gpos50
 
 Let’s check the coverage across the most highly-ranked region with
-default settings. By default, the specified range will be outlined
-(i.e. highlighted) with a blue rectangle which is able to be turned off
-and customised as the user sees fit.
+default settings.
 
 ``` r
 gr <- filter(tmm_results, hmp_fdr < 0.05, bestOverlap == "promoter")[1]
-gr <- keepStandardChromosomes(gr)
+```
+
+The most important option to consider when showing coverage is whether
+to display tracks individually or as overlapping tracks. Passing a
+BigWigFileList will plot each file on a separate track by default, with
+y-axis limits able to be specified as consistent across all tracks.
+Alternatively, by passing the coverage as a list of BigWigFileList
+objects, each list element will be drawn as a single track with coverage
+overlaid. For one or more overlaid tracks, colours will need to now be
+provided in a list with matching structure.
+
+The code for separate tracks would be: (not shown)
+
+``` r
 plotHFGC(gr, cytobands = grch37.cytobands, coverage = bwfl)
 ```
 
-<figure>
-<img
-src="differential_signal_sliding_files/figure-gfm/plot-hfgc-init-1.png"
-alt="Generic figure from plotHFGC showing coverage for the selected region only" />
-<figcaption aria-hidden="true">Generic figure from plotHFGC showing
-coverage for the selected region only</figcaption>
-</figure>
-
-The y-axes for the two treatments are clearly different and we can use
-the same colour scheme as previously. We can overlap the two treatments
-by providing the coverage as a list of `BigWigFileList` objects. Colours
-will need to now be provided in a list with matching structure. Zooming
-out may also give a little better context
+Overlaying coverage onto a single track can instead be highly
+informative and enables the visualisation of multiple ChIP targets
 
 ``` r
 cov_list <- list(H3K27ac = bwfl)
@@ -1223,25 +1195,32 @@ plotHFGC(
 <figure>
 <img
 src="differential_signal_sliding_files/figure-gfm/plot-hfgc-cov-1.png"
-alt="Zoomed out version of the above with coverage plots set to overlap" />
-<figcaption aria-hidden="true">Zoomed out version of the above with
-coverage plots set to overlap</figcaption>
+alt="Zoomed out version of the above region with coverage plots set to overlap" />
+<figcaption aria-hidden="true">Zoomed out version of the above region
+with coverage plots set to overlap</figcaption>
 </figure>
+
+By default, the specified range will also be outlined (i.e. highlighted)
+with a blue rectangle which is able to be turned off and customised as
+the user sees fit.
 
 ### Displaying Genes
 
 Next we might like to add gene models to provide the regulatory context.
-These are supplied here in the layout required by the defaults of the
-`GeneRegionTrack()` function, with all exons and transcripts annotated.
+We’ll use the exons element of our `gencode` object to create the format
+used by the defaults of the `GeneRegionTrack()` function, with all exons
+and transcripts annotated.
 
 ``` r
 gene_models <- gencode$exon %>% 
   select(
     type, gene = gene_id, exon = exon_id, transcript = transcript_id, 
     symbol = gene_name
-  ) %>% 
-  keepStandardChromosomes()
+  )
 ```
+
+Now we can add this to our plot, manually ensuring that all transcripts
+are shown (`collapseTranscripts = FALSE`)
 
 ``` r
 plotHFGC(
@@ -1263,39 +1242,19 @@ relationship of signal to annotated genes</em></figcaption>
 ### Adding Features
 
 Another useful track to add might be some key features such as promoters
-and other annotated regions, as we have formd earlier in the workflow.
+and other annotated regions, as we have formed earlier in the workflow.
 Features must **always** be a `GRangesList`, with each element defining
-a different type of feature, as we already have in our `regions_gr`
-object. For multiple feature tracks, a list of `GRangesList` objects can
-be passed.
-
-``` r
-regions <- keepStandardChromosomes(regions)
-plotHFGC(
-  gr, cytobands = grch37.cytobands, 
-  features = regions, featcol = region_colours, featstack = "dense",
-  coverage =  cov_list, linecol = cov_colour,
-  genes = gene_models, genecol = "wheat", collapseTranscripts = FALSE,
-  zoom = 50, rotation.title = 90, covsize = 10, genesize = 1, featsize = 5
-)
-```
-
-<figure>
-<img
-src="differential_signal_sliding_files/figure-gfm/plot-hfgc-with-regions-1.png"
-alt="The same figure as previously, but with annotated regions added as features. Any type of feature can be added here." />
-<figcaption aria-hidden="true"><em>The same figure as previously, but
-with annotated regions added as features. Any type of feature can be
-added here.</em></figcaption>
-</figure>
+a different type of feature, as we already have in our `regions` object.
+For multiple feature tracks, a list of `GRangesList` objects can be
+passed.
 
 ### Adding Annotations To Coverage
 
 An indication of which regions are associated with increased or
 decreased ChIP signal can also be a useful annotation to add to plots
 such as the above. Using the status from our differential signal
-testing, we can create a `GRangesList` with te various regions annotated
-as Increased, Unchanged etc,
+testing, we can create a `GRangesList` with the various regions
+annotated as Increased, Unchanged etc,
 
 Similar to the features track, where the names of `GRangesList` elements
 denote the different feature types, able to then assigned a colour,
@@ -1321,7 +1280,7 @@ performed will be annotated with colours indicating the result for that
 window. As can be seen multiple H3K27ac signal regions appear to be
 responding to DHT treatment for *KAT6B* with a possible intronic
 enhancer and alternative promoter being most likely impacted, including
-the neghbouring region to our initial range. In contradst, the primary
+the neighbouring region to our initial range. In contrast, the primary
 promoter appears unaffected by DHT treatment.
 
 ``` r
@@ -1354,6 +1313,139 @@ regions for multiple sites within a larger experiment.
 If long-range interactions are available, these can also be provided as
 a GenomicInteractions object, completing all available options for the
 HFGC components.
+
+# Session Info
+
+``` r
+sessionInfo()
+```
+
+    ## R version 4.3.0 (2023-04-21)
+    ## Platform: x86_64-pc-linux-gnu (64-bit)
+    ## Running under: Ubuntu 20.04.6 LTS
+    ## 
+    ## Matrix products: default
+    ## BLAS:   /usr/lib/x86_64-linux-gnu/blas/libblas.so.3.9.0 
+    ## LAPACK: /usr/lib/x86_64-linux-gnu/lapack/liblapack.so.3.9.0
+    ## 
+    ## locale:
+    ##  [1] LC_CTYPE=en_AU.UTF-8       LC_NUMERIC=C              
+    ##  [3] LC_TIME=en_AU.UTF-8        LC_COLLATE=en_AU.UTF-8    
+    ##  [5] LC_MONETARY=en_AU.UTF-8    LC_MESSAGES=en_AU.UTF-8   
+    ##  [7] LC_PAPER=en_AU.UTF-8       LC_NAME=C                 
+    ##  [9] LC_ADDRESS=C               LC_TELEPHONE=C            
+    ## [11] LC_MEASUREMENT=en_AU.UTF-8 LC_IDENTIFICATION=C       
+    ## 
+    ## time zone: Australia/Adelaide
+    ## tzcode source: system (glibc)
+    ## 
+    ## attached base packages:
+    ## [1] splines   stats4    stats     graphics  grDevices utils     datasets 
+    ## [8] methods   base     
+    ## 
+    ## other attached packages:
+    ##  [1] ggrepel_0.9.3               cqn_1.46.0                 
+    ##  [3] quantreg_5.95               SparseM_1.81               
+    ##  [5] preprocessCore_1.62.1       nor1mix_1.3-0              
+    ##  [7] mclust_6.0.0                quantro_1.34.0             
+    ##  [9] magrittr_2.0.3              here_1.0.1                 
+    ## [11] glue_1.6.2                  scales_1.2.1               
+    ## [13] plyranges_1.20.0            extraChIPs_1.4.2           
+    ## [15] patchwork_1.1.2             edgeR_3.42.4               
+    ## [17] limma_3.56.1                rtracklayer_1.60.0         
+    ## [19] BiocParallel_1.34.2         csaw_1.34.0                
+    ## [21] SummarizedExperiment_1.30.1 Biobase_2.60.0             
+    ## [23] MatrixGenerics_1.12.0       matrixStats_1.0.0          
+    ## [25] Rsamtools_2.16.0            Biostrings_2.68.1          
+    ## [27] XVector_0.40.0              GenomicRanges_1.52.0       
+    ## [29] GenomeInfoDb_1.36.0         IRanges_2.34.0             
+    ## [31] S4Vectors_0.38.1            BiocGenerics_0.46.0        
+    ## [33] lubridate_1.9.2             forcats_1.0.0              
+    ## [35] stringr_1.5.0               dplyr_1.1.2                
+    ## [37] purrr_1.0.1                 readr_2.1.4                
+    ## [39] tidyr_1.3.0                 tibble_3.2.1               
+    ## [41] ggplot2_3.4.2               tidyverse_2.0.0            
+    ## 
+    ## loaded via a namespace (and not attached):
+    ##   [1] ProtGenerics_1.32.0        bitops_1.0-7              
+    ##   [3] httr_1.4.6                 RColorBrewer_1.1-3        
+    ##   [5] doParallel_1.0.17          InteractionSet_1.28.0     
+    ##   [7] tools_4.3.0                doRNG_1.8.6               
+    ##   [9] backports_1.4.1            utf8_1.2.3                
+    ##  [11] R6_2.5.1                   HDF5Array_1.28.1          
+    ##  [13] mgcv_1.8-42                lazyeval_0.2.2            
+    ##  [15] Gviz_1.44.0                rhdf5filters_1.12.1       
+    ##  [17] GetoptLong_1.0.5           withr_2.5.0               
+    ##  [19] prettyunits_1.1.1          gridExtra_2.3             
+    ##  [21] base64_2.0.1               VennDiagram_1.7.3         
+    ##  [23] cli_3.6.1                  formatR_1.14              
+    ##  [25] labeling_0.4.2             genefilter_1.82.1         
+    ##  [27] askpass_1.1                foreign_0.8-84            
+    ##  [29] siggenes_1.74.0            illuminaio_0.42.0         
+    ##  [31] dichromat_2.0-0.1          scrime_1.3.5              
+    ##  [33] BSgenome_1.68.0            rstudioapi_0.14           
+    ##  [35] RSQLite_2.3.1              generics_0.1.3            
+    ##  [37] shape_1.4.6                BiocIO_1.10.0             
+    ##  [39] vroom_1.6.3                Matrix_1.5-4.1            
+    ##  [41] interp_1.1-4               futile.logger_1.4.3       
+    ##  [43] fansi_1.0.4                lifecycle_1.0.3           
+    ##  [45] yaml_2.3.7                 rhdf5_2.44.0              
+    ##  [47] BiocFileCache_2.8.0        grid_4.3.0                
+    ##  [49] blob_1.2.4                 crayon_1.5.2              
+    ##  [51] lattice_0.21-8             ComplexUpset_1.3.3        
+    ##  [53] GenomicFeatures_1.52.0     annotate_1.78.0           
+    ##  [55] KEGGREST_1.40.0            pillar_1.9.0              
+    ##  [57] knitr_1.43                 ComplexHeatmap_2.16.0     
+    ##  [59] beanplot_1.3.1             metapod_1.8.0             
+    ##  [61] rjson_0.2.21               codetools_0.2-19          
+    ##  [63] data.table_1.14.8          vctrs_0.6.2               
+    ##  [65] png_0.1-8                  gtable_0.3.3              
+    ##  [67] cachem_1.0.8               xfun_0.39                 
+    ##  [69] S4Arrays_1.0.4             ggside_0.2.2              
+    ##  [71] survival_3.5-5             iterators_1.0.14          
+    ##  [73] GenomicInteractions_1.34.0 nlme_3.1-162              
+    ##  [75] bit64_4.0.5                progress_1.2.2            
+    ##  [77] filelock_1.0.2             rprojroot_2.0.3           
+    ##  [79] rpart_4.1.19               colorspace_2.1-0          
+    ##  [81] DBI_1.1.3                  Hmisc_5.1-0               
+    ##  [83] nnet_7.3-18                tidyselect_1.2.0          
+    ##  [85] bit_4.0.5                  compiler_4.3.0            
+    ##  [87] curl_5.0.0                 htmlTable_2.4.1           
+    ##  [89] xml2_1.3.4                 DelayedArray_0.26.3       
+    ##  [91] checkmate_2.2.0            quadprog_1.5-8            
+    ##  [93] rappdirs_0.3.3             digest_0.6.31             
+    ##  [95] rmarkdown_2.22             GEOquery_2.68.0           
+    ##  [97] htmltools_0.5.5            pkgconfig_2.0.3           
+    ##  [99] jpeg_0.1-10                base64enc_0.1-3           
+    ## [101] sparseMatrixStats_1.12.0   highr_0.10                
+    ## [103] dbplyr_2.3.2               fastmap_1.1.1             
+    ## [105] ensembldb_2.24.0           rlang_1.1.1               
+    ## [107] GlobalOptions_0.1.2        htmlwidgets_1.6.2         
+    ## [109] DelayedMatrixStats_1.22.0  EnrichedHeatmap_1.30.0    
+    ## [111] farver_2.1.1               VariantAnnotation_1.46.0  
+    ## [113] RCurl_1.98-1.12            Formula_1.2-5             
+    ## [115] GenomeInfoDbData_1.2.10    Rhdf5lib_1.22.0           
+    ## [117] munsell_0.5.0              Rcpp_1.0.10               
+    ## [119] stringi_1.7.12             zlibbioc_1.46.0           
+    ## [121] MASS_7.3-60                plyr_1.8.8                
+    ## [123] bumphunter_1.42.0          minfi_1.46.0              
+    ## [125] parallel_4.3.0             deldir_1.0-9              
+    ## [127] multtest_2.56.0            hms_1.1.3                 
+    ## [129] circlize_0.4.15            locfit_1.5-9.7            
+    ## [131] igraph_1.4.3               rngtools_1.5.2            
+    ## [133] biomaRt_2.56.0             futile.options_1.0.1      
+    ## [135] XML_3.99-0.14              evaluate_0.21             
+    ## [137] latticeExtra_0.6-30        biovizBase_1.48.0         
+    ## [139] lambda.r_1.2.4             tzdb_0.4.0                
+    ## [141] foreach_1.5.2              tweenr_2.0.2              
+    ## [143] MatrixModels_0.5-1         openssl_2.0.6             
+    ## [145] polyclip_1.10-4            reshape_0.8.9             
+    ## [147] clue_0.3-64                ggforce_0.4.1             
+    ## [149] broom_1.0.4                xtable_1.8-4              
+    ## [151] restfulr_0.0.15            AnnotationFilter_1.24.0   
+    ## [153] memoise_2.0.1              AnnotationDbi_1.62.1      
+    ## [155] GenomicAlignments_1.36.0   cluster_2.1.4             
+    ## [157] timechange_0.2.0
 
 # References
 
@@ -1474,136 +1566,3 @@ Dependent Tests.” *Proc. Natl. Acad. Sci. U. S. A.* 116 (4): 1195–1200.
 </div>
 
 <br>
-
-# Session Info
-
-``` r
-sessionInfo()
-```
-
-    ## R version 4.3.0 (2023-04-21)
-    ## Platform: x86_64-pc-linux-gnu (64-bit)
-    ## Running under: Ubuntu 20.04.6 LTS
-    ## 
-    ## Matrix products: default
-    ## BLAS:   /usr/lib/x86_64-linux-gnu/blas/libblas.so.3.9.0 
-    ## LAPACK: /usr/lib/x86_64-linux-gnu/lapack/liblapack.so.3.9.0
-    ## 
-    ## locale:
-    ##  [1] LC_CTYPE=en_AU.UTF-8       LC_NUMERIC=C              
-    ##  [3] LC_TIME=en_AU.UTF-8        LC_COLLATE=en_AU.UTF-8    
-    ##  [5] LC_MONETARY=en_AU.UTF-8    LC_MESSAGES=en_AU.UTF-8   
-    ##  [7] LC_PAPER=en_AU.UTF-8       LC_NAME=C                 
-    ##  [9] LC_ADDRESS=C               LC_TELEPHONE=C            
-    ## [11] LC_MEASUREMENT=en_AU.UTF-8 LC_IDENTIFICATION=C       
-    ## 
-    ## time zone: Australia/Adelaide
-    ## tzcode source: system (glibc)
-    ## 
-    ## attached base packages:
-    ## [1] splines   stats4    stats     graphics  grDevices utils     datasets 
-    ## [8] methods   base     
-    ## 
-    ## other attached packages:
-    ##  [1] BSgenome.Hsapiens.UCSC.hg19_1.4.3 BSgenome_1.68.0                  
-    ##  [3] ggrepel_0.9.3                     cqn_1.46.0                       
-    ##  [5] quantreg_5.95                     SparseM_1.81                     
-    ##  [7] preprocessCore_1.62.1             nor1mix_1.3-0                    
-    ##  [9] mclust_6.0.0                      quantro_1.34.0                   
-    ## [11] magrittr_2.0.3                    here_1.0.1                       
-    ## [13] glue_1.6.2                        scales_1.2.1                     
-    ## [15] plyranges_1.20.0                  extraChIPs_1.4.3                 
-    ## [17] patchwork_1.1.2                   edgeR_3.42.4                     
-    ## [19] limma_3.56.1                      rtracklayer_1.60.0               
-    ## [21] BiocParallel_1.34.2               csaw_1.34.0                      
-    ## [23] SummarizedExperiment_1.30.1       Biobase_2.60.0                   
-    ## [25] MatrixGenerics_1.12.0             matrixStats_1.0.0                
-    ## [27] Rsamtools_2.16.0                  Biostrings_2.68.1                
-    ## [29] XVector_0.40.0                    GenomicRanges_1.52.0             
-    ## [31] GenomeInfoDb_1.36.0               IRanges_2.34.0                   
-    ## [33] S4Vectors_0.38.1                  BiocGenerics_0.46.0              
-    ## [35] lubridate_1.9.2                   forcats_1.0.0                    
-    ## [37] stringr_1.5.0                     dplyr_1.1.2                      
-    ## [39] purrr_1.0.1                       readr_2.1.4                      
-    ## [41] tidyr_1.3.0                       tibble_3.2.1                     
-    ## [43] ggplot2_3.4.2                     tidyverse_2.0.0                  
-    ## 
-    ## loaded via a namespace (and not attached):
-    ##   [1] ProtGenerics_1.32.0        bitops_1.0-7              
-    ##   [3] httr_1.4.6                 RColorBrewer_1.1-3        
-    ##   [5] doParallel_1.0.17          InteractionSet_1.28.0     
-    ##   [7] tools_4.3.0                doRNG_1.8.6               
-    ##   [9] backports_1.4.1            utf8_1.2.3                
-    ##  [11] R6_2.5.1                   HDF5Array_1.28.1          
-    ##  [13] mgcv_1.8-42                lazyeval_0.2.2            
-    ##  [15] Gviz_1.44.0                rhdf5filters_1.12.1       
-    ##  [17] GetoptLong_1.0.5           withr_2.5.0               
-    ##  [19] prettyunits_1.1.1          gridExtra_2.3             
-    ##  [21] base64_2.0.1               VennDiagram_1.7.3         
-    ##  [23] cli_3.6.1                  formatR_1.14              
-    ##  [25] labeling_0.4.2             genefilter_1.82.1         
-    ##  [27] askpass_1.1                foreign_0.8-84            
-    ##  [29] siggenes_1.74.0            illuminaio_0.42.0         
-    ##  [31] dichromat_2.0-0.1          scrime_1.3.5              
-    ##  [33] rstudioapi_0.14            RSQLite_2.3.1             
-    ##  [35] generics_0.1.3             shape_1.4.6               
-    ##  [37] BiocIO_1.10.0              vroom_1.6.3               
-    ##  [39] Matrix_1.5-4.1             interp_1.1-4              
-    ##  [41] futile.logger_1.4.3        fansi_1.0.4               
-    ##  [43] lifecycle_1.0.3            yaml_2.3.7                
-    ##  [45] rhdf5_2.44.0               BiocFileCache_2.8.0       
-    ##  [47] grid_4.3.0                 blob_1.2.4                
-    ##  [49] crayon_1.5.2               lattice_0.21-8            
-    ##  [51] ComplexUpset_1.3.3         GenomicFeatures_1.52.0    
-    ##  [53] annotate_1.78.0            KEGGREST_1.40.0           
-    ##  [55] pillar_1.9.0               knitr_1.43                
-    ##  [57] ComplexHeatmap_2.16.0      beanplot_1.3.1            
-    ##  [59] metapod_1.8.0              rjson_0.2.21              
-    ##  [61] codetools_0.2-19           data.table_1.14.8         
-    ##  [63] vctrs_0.6.2                png_0.1-8                 
-    ##  [65] gtable_0.3.3               cachem_1.0.8              
-    ##  [67] xfun_0.39                  S4Arrays_1.0.4            
-    ##  [69] ggside_0.2.2               survival_3.5-5            
-    ##  [71] iterators_1.0.14           GenomicInteractions_1.34.0
-    ##  [73] nlme_3.1-162               bit64_4.0.5               
-    ##  [75] progress_1.2.2             filelock_1.0.2            
-    ##  [77] rprojroot_2.0.3            rpart_4.1.19              
-    ##  [79] colorspace_2.1-0           DBI_1.1.3                 
-    ##  [81] Hmisc_5.1-0                nnet_7.3-18               
-    ##  [83] tidyselect_1.2.0           bit_4.0.5                 
-    ##  [85] compiler_4.3.0             curl_5.0.0                
-    ##  [87] htmlTable_2.4.1            xml2_1.3.4                
-    ##  [89] DelayedArray_0.26.3        checkmate_2.2.0           
-    ##  [91] quadprog_1.5-8             rappdirs_0.3.3            
-    ##  [93] digest_0.6.31              rmarkdown_2.22            
-    ##  [95] GEOquery_2.68.0            htmltools_0.5.5           
-    ##  [97] pkgconfig_2.0.3            jpeg_0.1-10               
-    ##  [99] base64enc_0.1-3            sparseMatrixStats_1.12.0  
-    ## [101] highr_0.10                 dbplyr_2.3.2              
-    ## [103] fastmap_1.1.1              ensembldb_2.24.0          
-    ## [105] rlang_1.1.1                GlobalOptions_0.1.2       
-    ## [107] htmlwidgets_1.6.2          DelayedMatrixStats_1.22.0 
-    ## [109] EnrichedHeatmap_1.30.0     farver_2.1.1              
-    ## [111] VariantAnnotation_1.46.0   RCurl_1.98-1.12           
-    ## [113] Formula_1.2-5              GenomeInfoDbData_1.2.10   
-    ## [115] Rhdf5lib_1.22.0            munsell_0.5.0             
-    ## [117] Rcpp_1.0.10                stringi_1.7.12            
-    ## [119] zlibbioc_1.46.0            MASS_7.3-60               
-    ## [121] plyr_1.8.8                 bumphunter_1.42.0         
-    ## [123] minfi_1.46.0               parallel_4.3.0            
-    ## [125] deldir_1.0-9               multtest_2.56.0           
-    ## [127] hms_1.1.3                  circlize_0.4.15           
-    ## [129] locfit_1.5-9.7             igraph_1.4.3              
-    ## [131] rngtools_1.5.2             biomaRt_2.56.0            
-    ## [133] futile.options_1.0.1       XML_3.99-0.14             
-    ## [135] evaluate_0.21              latticeExtra_0.6-30       
-    ## [137] biovizBase_1.48.0          lambda.r_1.2.4            
-    ## [139] tzdb_0.4.0                 foreach_1.5.2             
-    ## [141] tweenr_2.0.2               MatrixModels_0.5-1        
-    ## [143] openssl_2.0.6              polyclip_1.10-4           
-    ## [145] reshape_0.8.9              clue_0.3-64               
-    ## [147] ggforce_0.4.1              broom_1.0.4               
-    ## [149] xtable_1.8-4               restfulr_0.0.15           
-    ## [151] AnnotationFilter_1.24.0    memoise_2.0.1             
-    ## [153] AnnotationDbi_1.62.1       GenomicAlignments_1.36.0  
-    ## [155] cluster_2.1.4              timechange_0.2.0
