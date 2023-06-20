@@ -927,49 +927,20 @@ empty circles</figcaption>
 
 In addition to which gene is likely to be directly impacted by the
 detected signal, knowing which type of regulatory region signal was
-observed in is another question commonly asked of ChIP-Seq data. We’ve
-already defined our promoters, so let’s keep using `reduceMC()` along
-with `setdiffMC()` to define unique *upstream promoter*, *exon*,
-*intron* and *intergenic* regions in a hierarchical manner such that
-each nucleotide only belongs to one type of region.
-
-First we’ll shift our start sites upstream by 2.5kb, then we can extend
-another 2.5kb to define regions 5kb upstream from a TSS. Then we’ll
-merge overlapping regions using `reduceMC()` and separate these from any
-promoters we’ve already defined using `setdiffMC()`
+observed in is another question commonly asked of ChIP-Seq data. The
+function `deinfeRegions()` takes, gene-, transcript- and exon-level
+information from an annotation source and creates unique region
+annotations across the genome. These are for in hierarchical order
+as: 1) Promoters, 2) Upstream Promoters, 3) Exons, 4) Introns, 5)
+Proximal Intergenic and, 6 Distal Intergenic regions.
 
 ``` r
-regions <- GRangesList(promoter = promoters)
-regions$upstream <- gencode$transcript %>% 
-  select(gene_id, ends_with("name")) %>% 
-  resize(width = 1, fix = "start") %>% 
-  shift_upstream(2500) %>% 
-  promoters(upstream = 2500, downstream = 0) %>% 
-  reduceMC() %>% 
-  setdiffMC(regions$promoter, ignore.strand = TRUE)
+regions <- defineRegions(
+  genes = gencode$gene, transcripts = gencode$transcript, exons = gencode$exon
+)
 ```
 
-We can use a similar approach to define exons, not already classified as
-being within a promoter, and introns not already assigned as promoters.
-
-``` r
-regions$exon <- gencode$exon %>% 
-  select(gene_id, ends_with("name")) %>% 
-  setdiffMC(unlist(regions), ignore.strand = TRUE) 
-regions$intron <- gencode$gene %>% 
-  select(gene_id, ends_with("name")) %>% 
-  setdiffMC(unlist(regions), ignore.strand = TRUE) 
-```
-
-For our intergenic regions, there will be no gene information so we can
-simply use the slightly faster `setdiff()` function.
-
-``` r
-regions$intergenic <- GRanges("chr10:42354900-100000000") %>% 
-  setdiff(unlist(regions), ignore.strand = TRUE)
-```
-
-Using the function `bestOverlap()` we can assign each window with
+We can now use the function `bestOverlap()` to assign each window with
 ChIP-Seq signal to the region which it shows the greatest overlap,
 setting this as a factor which reflects the hierarchy with which the
 regions were defined.
@@ -977,7 +948,7 @@ regions were defined.
 ``` r
 tmm_results$bestOverlap <- bestOverlap(tmm_results, regions) %>% 
   factor(levels = names(regions))
-tmm_results %>% filter(hmp_fdr < 0.05, bestOverlap == "promoter")
+filter(tmm_results, hmp_fdr < 0.05, bestOverlap == "promoter")
 ```
 
     ## GRanges object with 2 ranges and 14 metadata columns:
@@ -1004,6 +975,16 @@ tmm_results %>% filter(hmp_fdr < 0.05, bestOverlap == "promoter")
     ##   -------
     ##   seqinfo: 25 sequences from GRCh37 genome
 
+Given the region column contains nicely formateed output, we can also
+use this
+
+``` r
+reg_levels <- vapply(regions, function(x) x$region[1], character(1))
+tmm_results$bestOverlap <- tmm_results %>% 
+  bestOverlap(unlist(regions), var = "region") %>% 
+  factor(levels = reg_levels)
+```
+
 # Visualisation of Results
 
 ## Pie Charts
@@ -1014,8 +995,8 @@ regions. First we’ll define a consistent colour palette for these
 regions in all plots.
 
 ``` r
-region_colours <- hcl.colors(length(regions), "Viridis", rev = TRUE)
-names(region_colours) <- names(regions)
+region_colours <- hcl.colors(length(reg_levels), "Viridis", rev = TRUE)
+names(region_colours) <- reg_levels
 ```
 
 Labels produced using `plotPie()` use the `glue()` syntax and are able
@@ -1025,18 +1006,12 @@ to fill the pie segments. Totals and percentages within each segment are
 accessible using `n` and `p` respectively as these are columns within
 the internal `data.frame` formed when creating the plot. External
 formatting functions such as `comma()`, `percent()` or `str_to_title()`
-can also be put to good use here. In the label
-`"{str_to_title(.data[[fill]])}\n{n}\n({percent(p, 0.1)})"`, the first
-braces take the values from the bestOverlap (i.e. fill) column and
-format them using `str_to_title()`. The second braces take the category
-counts using the value `n` and the third braces format the proportions
-`p` as percentages. Each set of braces is separated by a line break
-using `\n`
+can also be put to good use here.
 
 ``` r
 plotPie(
   tmm_results, fill = "bestOverlap", min_p = 0.05,
-  cat_glue = "{str_to_title(.data[[fill]])}\n{n}\n({percent(p, 0.1)})"
+  cat_glue = "{.data[[fill]]}\n{n}\n({percent(p, 0.1)})"
 ) +
   scale_fill_manual(values = region_colours)
 ```
@@ -1058,7 +1033,7 @@ counts.
 plotPie(
   tmm_results, fill = "bestOverlap", scale_by = "width",
   total_glue = "{comma(N)}kb", total_size = 5,
-  cat_glue = "{str_to_title(.data[[fill]])}\n({percent(p, 0.1)})",
+  cat_glue = "{str_replace_all(.data[[fill]], ' ', '\n')}\n({percent(p, 0.1)})",
   cat_size = 4, cat_adj = 0.1, min_p = 0.04
 ) +
   scale_fill_manual(values = region_colours)
@@ -1102,8 +1077,8 @@ key segments of interest.
 plotSplitDonut(
   tmm_results, inner = "bestOverlap", outer = "status", 
   inner_palette = region_colours, outer_palette = status_colours,
-  inner_glue = "{str_to_title(.data[[inner]])}\nn = {comma(n)}\n{percent(p,0.1)}",
-  outer_glue = "{.data[[outer]]}\n{str_to_title(.data[[inner]])}\nn = {n}",
+  inner_glue = "{str_replace_all(.data[[inner]], ' ', '\n')}\nn = {comma(n)}\n{percent(p,0.1)}",
+  outer_glue = "{.data[[outer]]}\n{str_replace_all(.data[[inner]], ' ', '\n')}\nn = {n}",
   explode_outer = "(In|De)creased", explode_r = 0.3, 
   outer_label = "text", outer_min_p = 0, outer_max_p = 0.02
 )
@@ -1162,7 +1137,7 @@ Let’s check the coverage across the most highly-ranked region with
 default settings.
 
 ``` r
-gr <- filter(tmm_results, hmp_fdr < 0.05, bestOverlap == "promoter")[1]
+gr <- filter(tmm_results, hmp_fdr < 0.05, str_detect(bestOverlap, '^Prom'))[1]
 ```
 
 The most important option to consider when showing coverage is whether
@@ -1284,6 +1259,7 @@ the neighbouring region to our initial range. In contrast, the primary
 promoter appears unaffected by DHT treatment.
 
 ``` r
+names(region_colours) <- names(regions)
 plotHFGC(
   gr, cytobands = grch37.cytobands, 
   features = regions, featcol = region_colours, featstack = "dense",
