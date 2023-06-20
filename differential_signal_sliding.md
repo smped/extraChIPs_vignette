@@ -938,7 +938,69 @@ Proximal Intergenic and, 6 Distal Intergenic regions.
 regions <- defineRegions(
   genes = gencode$gene, transcripts = gencode$transcript, exons = gencode$exon
 )
+regions
 ```
+
+    ## GRangesList object of length 6:
+    ## $promoter
+    ## GRanges object with 1491 ranges and 5 metadata columns:
+    ##          seqnames            ranges strand |                region
+    ##             <Rle>         <IRanges>  <Rle> |           <character>
+    ##      [1]    chr10 42644498-42647497      * | Promoter (-2500/+500)
+    ##      [2]    chr10 42678287-42681286      * | Promoter (-2500/+500)
+    ##      [3]    chr10 42702938-42705937      * | Promoter (-2500/+500)
+    ##      [4]    chr10 42729924-42732923      * | Promoter (-2500/+500)
+    ##      [5]    chr10 42735669-42738668      * | Promoter (-2500/+500)
+    ##      ...      ...               ...    ... .                   ...
+    ##   [1487]    chr10 99695536-99698535      * | Promoter (-2500/+500)
+    ##   [1488]    chr10 99770595-99773594      * | Promoter (-2500/+500)
+    ##   [1489]    chr10 99789879-99793085      * | Promoter (-2500/+500)
+    ##   [1490]    chr10 99891881-99894913      * | Promoter (-2500/+500)
+    ##   [1491]    chr10 99920140-99923543      * | Promoter (-2500/+500)
+    ##                        gene_id       gene_name
+    ##                <CharacterList> <CharacterList>
+    ##      [1]   ENSG00000229485.1_5          KSR1P1
+    ##      [2]   ENSG00000237592.2_5     IGKV1OR10-1
+    ##      [3]   ENSG00000271650.1_7 ENSG00000271650
+    ##      [4]     ENSG00000264398.1      AL031601.1
+    ##      [5]   ENSG00000290458.1_2 ENSG00000290458
+    ##      ...                   ...             ...
+    ##   [1487] ENSG00000095713.14_13          CRTAC1
+    ##   [1488] ENSG00000095713.14_13          CRTAC1
+    ##   [1489] ENSG00000095713.14_13          CRTAC1
+    ##   [1490]  ENSG00000166024.14_8         R3HCC1L
+    ##   [1491]  ENSG00000166024.14_8         R3HCC1L
+    ##                                                            transcript_id
+    ##                                                          <CharacterList>
+    ##      [1]                                             ENST00000446298.1_2
+    ##      [2]                                             ENST00000442306.2_2
+    ##      [3]                                             ENST00000605702.1_2
+    ##      [4]                                               ENST00000580460.1
+    ##      [5]                                             ENST00000622823.4_3
+    ##      ...                                                             ...
+    ##   [1487]                                             ENST00000413387.5_4
+    ##   [1488]                                             ENST00000309155.3_5
+    ##   [1489]                        ENST00000370597.8_11,ENST00000370591.6_9
+    ##   [1490]                         ENST00000370584.7_7,ENST00000298999.8_8
+    ##   [1491] ENST00000370586.6_5,ENST00000613938.4_5,ENST00000612478.4_2,...
+    ##                                  transcript_name
+    ##                                  <CharacterList>
+    ##      [1]                              KSR1P1-201
+    ##      [2]                         IGKV1OR10-1-201
+    ##      [3]                         ENST00000605702
+    ##      [4]                          AL031601.1-201
+    ##      [5]                         ENST00000622823
+    ##      ...                                     ...
+    ##   [1487]                              CRTAC1-204
+    ##   [1488]                              CRTAC1-201
+    ##   [1489]                   CRTAC1-203,CRTAC1-202
+    ##   [1490]                 R3HCC1L-203,R3HCC1L-201
+    ##   [1491] R3HCC1L-204,R3HCC1L-206,R3HCC1L-205,...
+    ##   -------
+    ##   seqinfo: 25 sequences from GRCh37 genome
+    ## 
+    ## ...
+    ## <5 more elements>
 
 We can now use the function `bestOverlap()` to assign each window with
 ChIP-Seq signal to the region which it shows the greatest overlap,
@@ -946,8 +1008,7 @@ setting this as a factor which reflects the hierarchy with which the
 regions were defined.
 
 ``` r
-tmm_results$bestOverlap <- bestOverlap(tmm_results, regions) %>% 
-  factor(levels = names(regions))
+tmm_results$bestOverlap <- bestOverlap(tmm_results, regions) 
 filter(tmm_results, hmp_fdr < 0.05, bestOverlap == "promoter")
 ```
 
@@ -969,7 +1030,7 @@ filter(tmm_results, hmp_fdr < 0.05, bestOverlap == "promoter")
     ##   [1]                     ENSG00000156650.14_17                KAT6B
     ##   [2] ENSG00000204049.1_8,ENSG00000151208.17_11 ENSG00000204049,DLG5
     ##       bestOverlap
-    ##          <factor>
+    ##       <character>
     ##   [1]    promoter
     ##   [2]    promoter
     ##   -------

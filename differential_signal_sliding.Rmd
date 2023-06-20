@@ -730,6 +730,7 @@ These are for in hierarchical order as: 1) Promoters, 2) Upstream Promoters,
 regions <- defineRegions(
   genes = gencode$gene, transcripts = gencode$transcript, exons = gencode$exon
 )
+regions
 ```
 
 
