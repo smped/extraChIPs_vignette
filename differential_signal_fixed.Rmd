@@ -117,19 +117,21 @@ treat_colours <- setNames(c("steelblue", "red3"), treat_levels)
 
 We'll eventually be loading counts for differential signal analysis from a set 
 of BamFiles, so first we'll create a `BamFileList` with all of these files.
-This also enables creation of a `Seqinfo` object based on the actual reference 
-genome to which the reads were aligned during data preparation.
-`Seqinfo` objects are the foundation of working with GRanges, so defining an 
-object at the start of a workflow is good practice.
+
 
 ```{r bfl}
 bfl <- here("data", "ER", glue("{samples$accession}.bam")) %>% 
   BamFileList() %>% 
   setNames(str_remove_all(names(.), ".bam"))
 file.exists(path(bfl))
-sq <- seqinfo(bfl)
-isCircular(sq) <- rep(FALSE, length(seqlevels(sq)))
-genome(sq) <- "GRCh37"
+```
+
+`Seqinfo` objects are the foundation of working with GRanges, so defining an 
+object at the start of a workflow is good practice.
+This is simply enabled with `extraChIPs` by using `defineSeqinfo()` and specifying the appropriate genome.
+
+```{r sq}
+sq <- defineSeqinfo("GRCh37")
 ```
 
 Another key preparatory step for working with peaks is to define a set of 
@@ -160,6 +162,11 @@ so we can exclude these regions right from the start
 peaks <- here("data", "ER", glue("{samples$accession}_peaks.narrowPeak")) %>% 
   importPeaks(seqinfo = sq, blacklist = omit_ranges)
 ```
+
+```{r save-peaks, echo=FALSE}
+save(peaks, file = "peaks.rda")
+```
+
 
 This will import the peaks from all files as a single `GRangesList` object, 
 adding the file-name to each element by default.
@@ -305,6 +312,11 @@ se <- regionCounts(bfl, centred_peaks, ext = 200)
 se
 ```
 
+```{r save-se, echo=FALSE}
+save(se, file = "se.rda")
+```
+
+
 The `colData()` element of the returned object as the columns 
 `r pander::pander(colnames(colData(se)))`, which are all informative and can be 
 supplemented with our `samples` data frame.
@@ -318,8 +330,7 @@ colData(se) <- colData(se) %>%
   left_join(samples) %>% 
   mutate(sample = accession) %>% 
   as.data.frame() %>% 
-  column_to_rownames("accession") %>% 
-  DataFrame()
+  DataFrame(row.names = .$accession)
 colData(se)
 ```
 
@@ -453,13 +464,7 @@ mapped to genes.
 tmm_mapped_res <- tmm_res %>% 
   colToRanges("union_peak") %>% 
   mapByFeature(genes = gencode$gene, prom = promoters) %>% 
-  mutate(
-    status = case_when(
-      FDR >= .05 ~ "Unchanged",
-      logFC > 0 ~ "Increased",
-      logFC < 0 ~ "Decreased"
-    )
-  )
+  addDiffStatus()
 arrange(tmm_mapped_res, PValue)
 ```
 
@@ -475,18 +480,6 @@ Heatmaps' where coverage is smoothed within bins surrounding our peak centre.
 The function `getProfileData()` takes a set of ranges and a BigWigFileList, and 
 performs the smoothing, which is then passed to the function 
 `plotProfileHeatmap()`.
-Let's first check the basic coverage using the SPMR-scaled values as produced 
-by `macs2`.
-These are equivalent to CPM values and can be log-transformed as required.
-
-```{r cov-bw}
-cov_bw <- here::here(
-  "data", "ER", glue("{levels(samples$treatment)}_cov_chr10.bw")
-) %>% 
-  BigWigFileList() %>% 
-  setNames(treat_levels)
-```
-
 
 The following shows the three steps of 1) defining the ranges, 2) obtaining the 
 smoothed binding profiles, and 3) drawing the heatmap.
@@ -495,20 +488,9 @@ any Increased or Decreased regions.
 By default, this will also draw the smoothed lines in the top panel using 
 different colours.
 
-(Note the SPMR values were calculated using the complete genome and will differ 
-significantly from those obtained during model fitting above, as this will only 
-use library sizes for our highly restricted subset of the genome.)
-
-```{r cov-profile-heatmaps, fig.cap = "*Profile Heatmap showing read coverage for all sites considered as showing evidence of differential signal. The sites are annotated by status using facets along the y-axis*"}
-sig_ranges <- filter(tmm_mapped_res, FDR < 0.05)
-pd <- getProfileData(cov_bw, sig_ranges)
-plotProfileHeatmap(pd, "profile_data", facetY = "status") +
-  scale_fill_gradient(low = "white", high = "red") +
-  labs(fill = "logCPM", colour = "Status")
-```
-
-As an alternative to CPM-like coverage values, we can use fold-enrichment over 
-the input sample(s), as is also produced by `macs2 bdgcmp`.
+These plots can be used to show coverage-like values (SPMR or CPM) or we can 
+use fold-enrichment over the input sample(s), as is also produced by 
+`macs2 bdgcmp`.
 This data isn't generally visualised using log-transformation so we'll set 
 `log = FALSE` in our call to `getProfileData()`
 
@@ -516,9 +498,10 @@ This data isn't generally visualised using log-transformation so we'll set
 fe_bw <- here("data", "ER", glue("{treat_levels}_FE_chr10.bw")) %>% 
   BigWigFileList() %>% 
   setNames(treat_levels)
+sig_ranges <- filter(tmm_mapped_res, FDR < 0.05)
 pd_fe <- getProfileData(fe_bw, sig_ranges, log = FALSE) 
 pd_fe %>% 
-  plotProfileHeatmap("profile_data") +
+  plotProfileHeatmap("profile_data", facetY = "status") +
   scale_fill_gradient(low = "white", high = "red") +
   labs(fill = "Fold\nEnrichment")
 ```
@@ -543,32 +526,25 @@ gr <- arrange(tmm_mapped_res, PValue)[1]
 gr
 ```
 
-
-```{r plot-hfgc-basic, fig.cap = "*The most simple coverage output for plotHFGC*"}
-plotHFGC(gr, coverage = cov_bw)
-```
-
-As can be seen from the y-limits, although the shape of the peaks is the same, 
-the coverage is significantly different.
-We could manually set this to be the same on both tracks
-
-```{r plot-hfgc-ylim, eval = FALSE, fig.cap = "*The same plot as above, but setting y-axis limits manually*"}
-plotHFGC(gr, coverage = cov_bw, ylim = c(0, 5))
-```
-
-An alternative may be to plot both treatments on the same track.
+In order to plot both treatments on the same track, we can pass a list of 
+BigWigFileList objects.
 By default, if a BigWigFileList is passed to `plotHFGC()` each BigWig file will 
-be drawn on a separate track.
-To overlap the tracks, we can pass a named list of BigWigFileList objects and a 
-corresponding list of colours, using the same structure
+be drawn on a separate track, but choosing to pass a list will lead to each 
+BigWigFileList being drawn as lines overlaid on the same track, making the 
+addition of multiple coverage tracks simple.
+Colours are required to be passed using the same list stricture.
 
-```{r plot-hfgc-overlap, fig.cap = "*Coverage tracks can be overlaid to ensure a coparable y-axis*"}
+```{r setup-coverage}
+cov_bw <- here::here(
+  "data", "ER", glue("{levels(samples$treatment)}_cov_chr10.bw")
+) %>% 
+  BigWigFileList() %>% 
+  setNames(treat_levels)
 cov_list <- list(ER = cov_bw)
 cov_colours <- list(ER = treat_colours)
-plotHFGC(gr, coverage = cov_list, linecol = cov_colours)
 ```
 
-We can add additional coverage tracks using the same strategy.
+
 Given we used H3K27ac data in the sliding windows vignette, let's load H3K27ac 
 coverage and add this to our plots.
 
@@ -583,7 +559,7 @@ cov_colours$H3K27ac <- treat_colours[treat_levels]
 
 Now let's zoom out and add some cytogenetic bands for reference
 
-```{r plot-hfgc-cytobands, fig.cap = "*Cytogentic bnds are providing for some genomes with `extraChIPs`. Ranges can also be zoomed in or out as required.*"}
+```{r plot-hfgc-cytobands, fig.cap = "*Cytogentic bands are providing for some genomes with `extraChIPs`. Ranges can also be zoomed in or out as required.*"}
 data("grch37.cytobands")
 plotHFGC(
   gr, 
@@ -596,13 +572,12 @@ Next, we might like to add some genes or transcripts.
 First we'll use the exon element of our Gencode data to create a suitable 
 object for Gviz.
 
-```{r plot-hfgc-genes, fig.cap = "*Genes can be added as a separate track. Here we can see that ER binding is upstream of the gene PPIF, with H3K27ac cverage associated with both the promoter and ER binding, suggesting that our particular range is in an enhancer.*"}
+```{r plot-hfgc-genes, fig.cap = "*Genes can be added as a separate track. Here we can see that ER binding is upstream of the gene PPIF, with H3K27ac coverage associated with both the promoter and ER binding, suggesting that our particular range is in an enhancer.*"}
 gene_models <- gencode$exon %>% 
   select(
     type, gene = gene_id, exon = exon_id, transcript = transcript_id, 
     symbol = gene_name
-  ) %>% 
-  keepStandardChromosomes()
+  ) 
 plotHFGC(
   gr, 
   genes = gene_models, genecol = "wheat",
@@ -612,49 +587,34 @@ plotHFGC(
 ```
 
 Given that we've already defined some promoters for our mapping to genes, we 
-can add these are features.
-For features, we need to pass `plotHFGC()` a named GRangesList, and the names 
-are used to provide colours to the features
-
-```{r plot-hfgc-features, fig.cap = "*Any type of genomic feature can be added. Here, possible promoters are shown in yellow*"}
-feat_grl <- GRangesList(Promoters = promoters) %>% 
-  keepStandardChromosomes()
-feat_colours <- list(Promoters = "yellow2")
-plotHFGC(
-  gr, 
-  features = feat_grl, featcol = feat_colours,
-  genes = gene_models, genecol = "wheat",
-  coverage = cov_list, linecol = cov_colours, rotation.title = 90,
-  cytobands = grch37.cytobands, zoom = 20
-)
-```
-
+can add these as features.
 We may also wish to add known binding sites for ER as provided by Encode.
-The file `esr1_chr10.hg19.bed.gz` was obtained from the UCSC Table Browser, and 
-this combines ER (i.e. *ESR1*) binding sites for multiple cell lines.
+The file `esr1_chr10.hg19.bed.gz` was obtained from the UCSC Table Browser, 
+then filtered to only contain Chromosome 10. and this combines ER (i.e. *ESR1*) 
+binding sites across multiple cell lines.
 
 ```{r esr1}
 esr1 <- here("data/ER/esr1_chr10.hg19.bed.gz") %>% 
   import.bed(
     colnames = c("chrom", "start", "end", "name", "score"), seqinfo = sq
-  ) %>% 
-  keepStandardChromosomes()
+  )
 ```
 
 We can separate out these features onto separate tracks using a similar 
 strategy to our coverage tracks.
-If we pass a GRangesList, all features will be drawn on the same track, however, 
-if we pass a list of GRangesList objects, each list element will be drawn as a 
-separate track.
-Our colours object will now need to be specified as a list with the same 
+If we pass a single GRangesList, all features will be drawn on the same track, 
+however, if we pass a list of GRangesList objects, each list element will be 
+drawn as a separate track.
+Our colours object will also need to be specified as a list with the same 
 structure.
 
-```{r plot-hfgc-feat-list, fig.cap = "*Features can also be shown on eparate tracks with informative track labels. Plots can also be shifted and multiple parameters are also able to be customised*"}
+```{r plot-hfgc-feat-list, fig.cap = "*Features can also be shown on separate tracks with informative track labels. Plots can also be shifted and multiple parameters are also able to be customised*"}
 feat_list <- list(
-  Promoters = feat_grl["Promoters"], ESR1 = GRangesList(ESR1 = esr1)
+  Promoters = GRangesList(promoters = promoters), 
+  ESR1 = GRangesList(esr1 = esr1)
 )
 feat_colours <- list(
-  Promoters = c(Promoters = "yellow2"), ESR1 = c(ESR1 = "royalblue")
+  Promoters = c(promoters = "yellow2"), ESR1 = c(esr1 = "royalblue")
 )
 plotHFGC(
   gr, 
@@ -674,16 +634,17 @@ on a separate track to those which are undetected or unchanged.
 Additional plotting functions which may be useful are also demonstrated in the 
 sliding windows vignette.
 
-## References
-
-<div id="refs"></div>
-<br>
-
 ## Session Info
 
 ```{r session-info}
 sessionInfo()
 ```
+
+
+## References
+
+<div id="refs"></div>
+<br>
 
 
 

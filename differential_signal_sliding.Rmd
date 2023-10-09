@@ -159,15 +159,18 @@ bfl <- here("data", "H3K27ac", glue("{accessions}.bam")) %>%
   BamFileList() %>% 
   setNames(str_remove_all(names(.), ".bam"))
 file.exists(path(bfl))
-sq <- seqinfo(bfl) %>% 
-  sortSeqlevels() %>% 
-  keepStandardChromosomes()
-isCircular(sq) <- rep(FALSE, length(seqlevels(sq)))
-genome(sq) <- "GRCh37"
+```
+
+`Seqinfo` objects are the foundation of working with GRanges, so defining an 
+object at the start of a workflow is good practice.
+This is simply enabled with `extraChIPs` by using `defineSeqinfo()` and specifying the appropriate genome.
+
+```{r sq}
+sq <- defineSeqinfo("GRCh37")
 ```
 
 **NB:** It should also be noted that counting all reads across a `BamFileList` 
-using sliding windows, **will require a significant amount of RAM** and will be 
+using sliding windows, **will require >50Gb of RAM** and will be 
 beyond the capacity of most laptops as of the time of writing.
 When working with complete datasets, this particular step is best performed on 
 an HPC or a similar interactive server with a large amount of memory.
@@ -244,8 +247,7 @@ colData(wincounts) <- colData(wincounts) %>%
     treatment = str_replace_na(treatment, "Input") %>% 
       as.factor()
   ) %>% 
-  DataFrame() %>% 
-  set_rownames(.$accession)
+  DataFrame(row.names = .$accession)
 ```
 
 A density plot can be simply drawn of these counts, with the vast majority of 
@@ -290,10 +292,7 @@ Multiple alternative filtering strategies are also provided by the package
 guide_regions <- here("data", "H3K27ac", "H3K27ac_chr10.bed") %>% 
   import.bed(seqinfo = sq)
 filtcounts <- dualFilter(
-  x = wincounts[, wincounts$target == "H3K27ac"],
-  bg = wincounts[, wincounts$target == "Input"], 
-  ref = guide_regions,
-  q = 0.6
+  x = wincounts, bg = "SRR8315192", ref = guide_regions, q = 0.6
 )
 ```
 
@@ -427,13 +426,7 @@ p-value is returned.
 
 ```{r merge-by-hmp}
 results_gr <- mergeByHMP(fit_gr, inc_cols = "overlaps_ref", merge_within = 120) %>% 
-  mutate(
-    status <- case_when(
-      hmp_fdr > 0.05 ~ "Unchanged",
-      logFC > 0 ~ "Increased",
-      logFC < 0 ~ "Decreased"
-    )
-  )
+  addDiffStatus(drop = TRUE)
 arrange(results_gr, hmp)[1:5]
 ```
 
@@ -535,13 +528,7 @@ tmm_gr <- fitAssayDiff(
   filtcounts, design = X, fc = 1.2, norm = "TMM", asRanges = TRUE
 )
 tmm_results <- mergeByHMP(tmm_gr, inc_cols = "overlaps_ref", merge_within = 120) %>% 
-  mutate(
-    status = case_when(
-      hmp_fdr > 0.05 ~ "Unchanged",
-      logFC < 0 ~ "Decreased",
-      logFC > 0 ~ "Increased"
-    )
-  )
+  addDiffStatus(drop = TRUE)
 table(tmm_results$status)
 ```
 
@@ -692,7 +679,7 @@ This can all be summarised into a single MA-plot for presentation of final
 results.
 
 
-```{r plot-ma-mapped, fig.cap = "MA-plot with the top 20 regions by significance labelled according to the most likely gene influenced by the detected signal. Regions which directly overlap a TSS are shown as empty circles"}
+```{r plot-ma-mapped, fig.cap = "MA-plot with the top 10 regions by significance labelled according to the most likely gene influenced by the detected signal. Regions which directly overlap a TSS are shown as empty circles"}
 status_colours <- c(Unchanged = "grey70", Increased = "red3", Decreased = "royalblue")
 tmm_results %>% 
   as_tibble() %>% 
@@ -702,7 +689,7 @@ tmm_results %>%
     aes(label = label),
     data = . %>% 
       arrange(hmp) %>% 
-      dplyr::slice(1:20) %>% 
+      dplyr::slice(1:10) %>% 
       mutate(
         label  = vapply(gene_name, paste, character(1), collapse = "; ") %>% 
           str_trunc(30)

@@ -137,20 +137,21 @@ file.exists(path(bfl))
 
     ## [1] TRUE TRUE TRUE TRUE TRUE TRUE TRUE
 
+`Seqinfo` objects are the foundation of working with GRanges, so
+defining an object at the start of a workflow is good practice. This is
+simply enabled with `extraChIPs` by using `defineSeqinfo()` and
+specifying the appropriate genome.
+
 ``` r
-sq <- seqinfo(bfl) %>% 
-  sortSeqlevels() %>% 
-  keepStandardChromosomes()
-isCircular(sq) <- rep(FALSE, length(seqlevels(sq)))
-genome(sq) <- "GRCh37"
+sq <- defineSeqinfo("GRCh37")
 ```
 
 **NB:** It should also be noted that counting all reads across a
-`BamFileList` using sliding windows, **will require a significant amount
-of RAM** and will be beyond the capacity of most laptops as of the time
-of writing. When working with complete datasets, this particular step is
-best performed on an HPC or a similar interactive server with a large
-amount of memory.
+`BamFileList` using sliding windows, **will require \>50Gb of RAM** and
+will be beyond the capacity of most laptops as of the time of writing.
+When working with complete datasets, this particular step is best
+performed on an HPC or a similar interactive server with a large amount
+of memory.
 
 The approach taken below is to first define a set of sliding windows
 across the genome, using the capabilities of `csaw`. After counting
@@ -223,7 +224,7 @@ rowRanges(wincounts)
     ##   [506537]    chr10 99999761-99999880      *
     ##   [506538]    chr10 99999801-99999920      *
     ##   -------
-    ##   seqinfo: 25 sequences from GRCh37 genome
+    ##   seqinfo: 24 sequences from GRCh37 genome
 
 We can also add some key information to the `colData` element of this
 object, which will also be propagated to all downstream objects.
@@ -255,8 +256,7 @@ colData(wincounts) <- colData(wincounts) %>%
     treatment = str_replace_na(treatment, "Input") %>% 
       as.factor()
   ) %>% 
-  DataFrame() %>% 
-  set_rownames(.$accession)
+  DataFrame(row.names = .$accession)
 ```
 
 A density plot can be simply drawn of these counts, with the vast
@@ -308,10 +308,7 @@ can be accessed using `?csaw::filterWindows`
 guide_regions <- here("data", "H3K27ac", "H3K27ac_chr10.bed") %>% 
   import.bed(seqinfo = sq)
 filtcounts <- dualFilter(
-  x = wincounts[, wincounts$target == "H3K27ac"],
-  bg = wincounts[, wincounts$target == "Input"], 
-  ref = guide_regions,
-  q = 0.6
+  x = wincounts, bg = "SRR8315192", ref = guide_regions, q = 0.6
 )
 ```
 
@@ -365,7 +362,7 @@ rowRanges(filtcounts)
     ##   [23416]    chr10 99895241-99895360      * |         TRUE
     ##   [23417]    chr10 99895281-99895400      * |         TRUE
     ##   -------
-    ##   seqinfo: 25 sequences from GRCh37 genome
+    ##   seqinfo: 24 sequences from GRCh37 genome
 
 ## Initial Visualisation
 
@@ -487,13 +484,7 @@ the original window with the lowest p-value is returned.
 
 ``` r
 results_gr <- mergeByHMP(fit_gr, inc_cols = "overlaps_ref", merge_within = 120) %>% 
-  mutate(
-    status <- case_when(
-      hmp_fdr > 0.05 ~ "Unchanged",
-      logFC > 0 ~ "Increased",
-      logFC < 0 ~ "Decreased"
-    )
-  )
+  addDiffStatus(drop = TRUE)
 arrange(results_gr, hmp)[1:5]
 ```
 
@@ -507,20 +498,20 @@ arrange(results_gr, hmp)[1:5]
     ##   [5]    chr10 63859401-63859760      * |         7         1         0
     ##       overlaps_ref            keyval_range    logCPM     logFC         hmp
     ##          <logical>               <GRanges> <numeric> <numeric>   <numeric>
-    ##   [1]         TRUE chr10:79257761-79257880   7.02801   1.83161 1.84310e-12
-    ##   [2]         TRUE chr10:43689681-43689800   6.50461   1.78769 8.00605e-09
-    ##   [3]         TRUE chr10:74008441-74008560   6.49284   1.81722 9.04613e-09
-    ##   [4]         TRUE chr10:63858881-63859000   5.99283   1.75275 5.91544e-07
-    ##   [5]         TRUE chr10:63859601-63859720   5.99405   1.82278 9.46455e-07
-    ##           hmp_fdr status.......
-    ##         <numeric>   <character>
-    ##   [1] 1.32519e-09     Increased
-    ##   [2] 2.16805e-06     Increased
-    ##   [3] 2.16805e-06     Increased
-    ##   [4] 1.06330e-04     Increased
-    ##   [5] 1.36100e-04     Increased
+    ##   [1]         TRUE chr10:79257761-79257880   7.01563   1.82950 2.08382e-12
+    ##   [2]         TRUE chr10:43689681-43689800   6.49125   1.78743 8.37664e-09
+    ##   [3]         TRUE chr10:74008441-74008560   6.48379   1.81692 9.27730e-09
+    ##   [4]         TRUE chr10:63858881-63859000   5.98361   1.75311 6.38262e-07
+    ##   [5]         TRUE chr10:63859601-63859720   5.98163   1.82260 1.02640e-06
+    ##           hmp_fdr    status
+    ##         <numeric>  <factor>
+    ##   [1] 1.49827e-09 Increased
+    ##   [2] 2.22346e-06 Increased
+    ##   [3] 2.22346e-06 Increased
+    ##   [4] 1.14728e-04 Increased
+    ##   [5] 1.47597e-04 Increased
     ##   -------
-    ##   seqinfo: 25 sequences from GRCh37 genome
+    ##   seqinfo: 24 sequences from GRCh37 genome
 
 In the above, we returned 19 ranges which we might consider using the
 significance threshold $\alpha$ = 0.05. As is common, we can assess our
@@ -622,7 +613,7 @@ qtest
     ##    nTotSamples:  6 
     ##    nSamplesinGroups:  3 3 
     ##    anovaPval:  0.49809 
-    ##    quantroStat:  0.19728 
+    ##    quantroStat:  0.19707 
     ##    quantroPvalPerm:  0.68
 
 Here, no differences were evident across median values (ANOVA p = 0.498)
@@ -639,19 +630,13 @@ tmm_gr <- fitAssayDiff(
   filtcounts, design = X, fc = 1.2, norm = "TMM", asRanges = TRUE
 )
 tmm_results <- mergeByHMP(tmm_gr, inc_cols = "overlaps_ref", merge_within = 120) %>% 
-  mutate(
-    status = case_when(
-      hmp_fdr > 0.05 ~ "Unchanged",
-      logFC < 0 ~ "Decreased",
-      logFC > 0 ~ "Increased"
-    )
-  )
+  addDiffStatus(drop = TRUE)
 table(tmm_results$status)
 ```
 
     ## 
-    ## Increased Unchanged 
-    ##        21       698
+    ## Unchanged Increased 
+    ##       698        21
 
 As might be expected, the results are highly concordant, with
 TMM-normalisation providing a moderate improvement in statistical power,
@@ -781,7 +766,7 @@ subset(tss, vapply(gene_name, function(x) "PPIF" %in% x, logical(1)))
     ##   [2]                   PPIF-204
     ##   [3]                   PPIF-202
     ##   -------
-    ##   seqinfo: 25 sequences from GRCh37 genome
+    ##   seqinfo: 24 sequences from GRCh37 genome
 
 We can also add the TSS overlap status to our set of results
 
@@ -834,7 +819,7 @@ tail(promoters)
     ##   [5]            CRTAC1-201
     ##   [6] CRTAC1-203,CRTAC1-202
     ##   -------
-    ##   seqinfo: 25 sequences from GRCh37 genome
+    ##   seqinfo: 24 sequences from GRCh37 genome
 
 ``` r
 tmm_results <- mapByFeature(
@@ -860,32 +845,32 @@ tmm_results %>% filter(hmp_fdr < 0.05) %>% arrange(hmp)
     ##   [21]    chr10 74878001-74878360      * |         7         3         0
     ##        overlaps_ref            keyval_range    logCPM     logFC         hmp
     ##           <logical>               <GRanges> <numeric> <numeric>   <numeric>
-    ##    [1]         TRUE chr10:79257761-79257880   7.02793   1.85621 6.20766e-13
-    ##    [2]         TRUE chr10:43689681-43689800   6.51086   1.81157 4.45187e-09
-    ##    [3]         TRUE chr10:74008441-74008560   6.49275   1.84270 5.07996e-09
-    ##    [4]         TRUE chr10:63858881-63859000   5.99257   1.77724 4.03575e-07
-    ##    [5]         TRUE chr10:63859601-63859720   5.99366   1.84777 6.37775e-07
+    ##    [1]         TRUE chr10:79257761-79257880   7.01952   1.85180 7.03850e-13
+    ##    [2]         TRUE chr10:43689681-43689800   6.49977   1.80954 4.86665e-09
+    ##    [3]         TRUE chr10:74008441-74008560   6.48714   1.84026 5.42397e-09
+    ##    [4]         TRUE chr10:63858881-63859000   5.98620   1.77565 4.36934e-07
+    ##    [5]         TRUE chr10:63859601-63859720   5.98356   1.84569 6.93451e-07
     ##    ...          ...                     ...       ...       ...         ...
-    ##   [17]         TRUE chr10:79307441-79307560   6.45271   1.15247 0.000563495
-    ##   [18]         TRUE chr10:74015201-74015320   6.14440   1.26391 0.000592892
-    ##   [19]         TRUE chr10:90615361-90615480   5.97947   1.14308 0.000804490
-    ##   [20]         TRUE chr10:63697121-63697240   6.00058   1.11473 0.001074487
-    ##   [21]         TRUE chr10:74878201-74878320   6.19539   1.05769 0.001437350
-    ##            hmp_fdr      status       tss               gene_id       gene_name
-    ##          <numeric> <character> <logical>       <CharacterList> <CharacterList>
-    ##    [1] 4.46331e-10   Increased     FALSE ENSG00000156113.25_17          KCNMA1
-    ##    [2] 1.21750e-06   Increased     FALSE ENSG00000198915.12_14        RASGEF1A
-    ##    [3] 1.21750e-06   Increased     FALSE   ENSG00000166295.9_6         ANAPC16
-    ##    [4] 7.25426e-05   Increased     FALSE ENSG00000150347.17_12          ARID5B
-    ##    [5] 9.17121e-05   Increased     FALSE ENSG00000150347.17_12          ARID5B
-    ##    ...         ...         ...       ...                   ...             ...
-    ##   [17]   0.0236827   Increased     FALSE ENSG00000156113.25_17          KCNMA1
-    ##   [18]   0.0236827   Increased     FALSE   ENSG00000289506.2_2 ENSG00000289506
-    ##   [19]   0.0304436   Increased     FALSE   ENSG00000152766.6_8         ANKRD22
-    ##   [20]   0.0386278   Increased     FALSE ENSG00000150347.17_12          ARID5B
-    ##   [21]   0.0492121   Increased     FALSE  ENSG00000166321.14_7          NUDT13
+    ##   [17]         TRUE chr10:79307441-79307560   6.44973   1.15029 0.000577866
+    ##   [18]         TRUE chr10:74015201-74015320   6.13914   1.26214 0.000589876
+    ##   [19]         TRUE chr10:90615361-90615480   5.97256   1.14085 0.000840392
+    ##   [20]         TRUE chr10:63697121-63697240   6.00583   1.11174 0.001117497
+    ##   [21]         TRUE chr10:74878201-74878320   6.19336   1.05547 0.001426818
+    ##            hmp_fdr    status       tss               gene_id       gene_name
+    ##          <numeric>  <factor> <logical>       <CharacterList> <CharacterList>
+    ##    [1] 5.06068e-10 Increased     FALSE ENSG00000156113.25_17          KCNMA1
+    ##    [2] 1.29994e-06 Increased     FALSE ENSG00000198915.12_14        RASGEF1A
+    ##    [3] 1.29994e-06 Increased     FALSE   ENSG00000166295.9_6         ANAPC16
+    ##    [4] 7.85389e-05 Increased     FALSE ENSG00000150347.17_12          ARID5B
+    ##    [5] 9.97183e-05 Increased     FALSE ENSG00000150347.17_12          ARID5B
+    ##    ...         ...       ...       ...                   ...             ...
+    ##   [17]   0.0235623 Increased     FALSE ENSG00000156113.25_17          KCNMA1
+    ##   [18]   0.0235623 Increased     FALSE   ENSG00000289506.2_2 ENSG00000289506
+    ##   [19]   0.0318022 Increased     FALSE   ENSG00000152766.6_8         ANKRD22
+    ##   [20]   0.0401740 Increased     FALSE ENSG00000150347.17_12          ARID5B
+    ##   [21]   0.0488515 Increased     FALSE  ENSG00000166321.14_7          NUDT13
     ##   -------
-    ##   seqinfo: 25 sequences from GRCh37 genome
+    ##   seqinfo: 24 sequences from GRCh37 genome
 
 So now we have our regions showing differential signal, along with which
 gene they are most likely to be impacting, and whether they directly
@@ -902,7 +887,7 @@ tmm_results %>%
     aes(label = label),
     data = . %>% 
       arrange(hmp) %>% 
-      dplyr::slice(1:20) %>% 
+      dplyr::slice(1:10) %>% 
       mutate(
         label  = vapply(gene_name, paste, character(1), collapse = "; ") %>% 
           str_trunc(30)
@@ -916,8 +901,8 @@ tmm_results %>%
 <figure>
 <img
 src="differential_signal_sliding_files/figure-gfm/plot-ma-mapped-1.png"
-alt="MA-plot with the top 20 regions by significance labelled according to the most likely gene influenced by the detected signal. Regions which directly overlap a TSS are shown as empty circles" />
-<figcaption aria-hidden="true">MA-plot with the top 20 regions by
+alt="MA-plot with the top 10 regions by significance labelled according to the most likely gene influenced by the detected signal. Regions which directly overlap a TSS are shown as empty circles" />
+<figcaption aria-hidden="true">MA-plot with the top 10 regions by
 significance labelled according to the most likely gene influenced by
 the detected signal. Regions which directly overlap a TSS are shown as
 empty circles</figcaption>
@@ -957,19 +942,32 @@ regions
     ##   [1489]    chr10 99789879-99793085      * | Promoter (-2500/+500)
     ##   [1490]    chr10 99891881-99894913      * | Promoter (-2500/+500)
     ##   [1491]    chr10 99920140-99923543      * | Promoter (-2500/+500)
-    ##                        gene_id       gene_name
-    ##                <CharacterList> <CharacterList>
-    ##      [1]   ENSG00000229485.1_5          KSR1P1
-    ##      [2]   ENSG00000237592.2_5     IGKV1OR10-1
-    ##      [3]   ENSG00000271650.1_7 ENSG00000271650
-    ##      [4]     ENSG00000264398.1      AL031601.1
-    ##      [5]   ENSG00000290458.1_2 ENSG00000290458
-    ##      ...                   ...             ...
-    ##   [1487] ENSG00000095713.14_13          CRTAC1
-    ##   [1488] ENSG00000095713.14_13          CRTAC1
-    ##   [1489] ENSG00000095713.14_13          CRTAC1
-    ##   [1490]  ENSG00000166024.14_8         R3HCC1L
-    ##   [1491]  ENSG00000166024.14_8         R3HCC1L
+    ##                                                                     gene_id
+    ##                                                             <CharacterList>
+    ##      [1]                                                ENSG00000229485.1_5
+    ##      [2]                                                ENSG00000237592.2_5
+    ##      [3]                                                ENSG00000271650.1_7
+    ##      [4]                                                  ENSG00000264398.1
+    ##      [5]                                                ENSG00000290458.1_2
+    ##      ...                                                                ...
+    ##   [1487]                                              ENSG00000095713.14_13
+    ##   [1488]                                              ENSG00000095713.14_13
+    ##   [1489]                        ENSG00000095713.14_13,ENSG00000095713.14_13
+    ##   [1490]                          ENSG00000166024.14_8,ENSG00000166024.14_8
+    ##   [1491] ENSG00000166024.14_8,ENSG00000166024.14_8,ENSG00000166024.14_8,...
+    ##                            gene_name
+    ##                      <CharacterList>
+    ##      [1]                      KSR1P1
+    ##      [2]                 IGKV1OR10-1
+    ##      [3]             ENSG00000271650
+    ##      [4]                  AL031601.1
+    ##      [5]             ENSG00000290458
+    ##      ...                         ...
+    ##   [1487]                      CRTAC1
+    ##   [1488]                      CRTAC1
+    ##   [1489]               CRTAC1,CRTAC1
+    ##   [1490]             R3HCC1L,R3HCC1L
+    ##   [1491] R3HCC1L,R3HCC1L,R3HCC1L,...
     ##                                                            transcript_id
     ##                                                          <CharacterList>
     ##      [1]                                             ENST00000446298.1_2
@@ -997,7 +995,7 @@ regions
     ##   [1490]                 R3HCC1L-203,R3HCC1L-201
     ##   [1491] R3HCC1L-204,R3HCC1L-206,R3HCC1L-205,...
     ##   -------
-    ##   seqinfo: 25 sequences from GRCh37 genome
+    ##   seqinfo: 24 sequences from GRCh37 genome
     ## 
     ## ...
     ## <5 more elements>
@@ -1019,22 +1017,18 @@ filter(tmm_results, hmp_fdr < 0.05, bestOverlap == "promoter")
     ##   [2]    chr10 79623321-79635960      * |       314        13         0
     ##       overlaps_ref            keyval_range    logCPM     logFC         hmp
     ##          <logical>               <GRanges> <numeric> <numeric>   <numeric>
-    ##   [1]         TRUE chr10:76779721-76779840   6.21638  1.244849 0.000194483
-    ##   [2]         TRUE chr10:79630321-79630440   7.71543  0.906496 0.000100434
-    ##          hmp_fdr      status       tss
-    ##        <numeric> <character> <logical>
-    ##   [1] 0.00932221   Increased     FALSE
-    ##   [2] 0.00515801   Increased      TRUE
-    ##                                         gene_id            gene_name
-    ##                                 <CharacterList>      <CharacterList>
-    ##   [1]                     ENSG00000156650.14_17                KAT6B
-    ##   [2] ENSG00000204049.1_8,ENSG00000151208.17_11 ENSG00000204049,DLG5
-    ##       bestOverlap
-    ##       <character>
-    ##   [1]    promoter
-    ##   [2]    promoter
+    ##   [1]         TRUE chr10:76779721-76779840   6.20849  1.242960 0.000189944
+    ##   [2]         TRUE chr10:79630321-79630440   7.70034  0.904713 0.000110317
+    ##          hmp_fdr    status       tss                                   gene_id
+    ##        <numeric>  <factor> <logical>                           <CharacterList>
+    ##   [1] 0.00910467 Increased     FALSE                     ENSG00000156650.14_17
+    ##   [2] 0.00566555 Increased      TRUE ENSG00000204049.1_8,ENSG00000151208.17_11
+    ##                  gene_name bestOverlap
+    ##            <CharacterList> <character>
+    ##   [1]                KAT6B    promoter
+    ##   [2] ENSG00000204049,DLG5    promoter
     ##   -------
-    ##   seqinfo: 25 sequences from GRCh37 genome
+    ##   seqinfo: 24 sequences from GRCh37 genome
 
 Given the region column contains nicely formateed output, we can also
 use this
@@ -1357,7 +1351,7 @@ HFGC components.
 sessionInfo()
 ```
 
-    ## R version 4.3.0 (2023-04-21)
+    ## R version 4.3.1 (2023-06-16)
     ## Platform: x86_64-pc-linux-gnu (64-bit)
     ## Running under: Ubuntu 20.04.6 LTS
     ## 
@@ -1382,35 +1376,36 @@ sessionInfo()
     ## 
     ## other attached packages:
     ##  [1] ggrepel_0.9.3               cqn_1.46.0                 
-    ##  [3] quantreg_5.95               SparseM_1.81               
+    ##  [3] quantreg_5.96               SparseM_1.81               
     ##  [5] preprocessCore_1.62.1       nor1mix_1.3-0              
     ##  [7] mclust_6.0.0                quantro_1.34.0             
     ##  [9] magrittr_2.0.3              here_1.0.1                 
     ## [11] glue_1.6.2                  scales_1.2.1               
-    ## [13] plyranges_1.20.0            extraChIPs_1.4.2           
-    ## [15] patchwork_1.1.2             edgeR_3.42.4               
-    ## [17] limma_3.56.1                rtracklayer_1.60.0         
-    ## [19] BiocParallel_1.34.2         csaw_1.34.0                
-    ## [21] SummarizedExperiment_1.30.1 Biobase_2.60.0             
-    ## [23] MatrixGenerics_1.12.0       matrixStats_1.0.0          
-    ## [25] Rsamtools_2.16.0            Biostrings_2.68.1          
-    ## [27] XVector_0.40.0              GenomicRanges_1.52.0       
-    ## [29] GenomeInfoDb_1.36.0         IRanges_2.34.0             
-    ## [31] S4Vectors_0.38.1            BiocGenerics_0.46.0        
-    ## [33] lubridate_1.9.2             forcats_1.0.0              
-    ## [35] stringr_1.5.0               dplyr_1.1.2                
-    ## [37] purrr_1.0.1                 readr_2.1.4                
-    ## [39] tidyr_1.3.0                 tibble_3.2.1               
-    ## [41] ggplot2_3.4.2               tidyverse_2.0.0            
+    ## [13] plyranges_1.20.0            extraChIPs_1.5.14          
+    ## [15] ggside_0.2.2                patchwork_1.1.2            
+    ## [17] edgeR_3.42.4                limma_3.56.2               
+    ## [19] rtracklayer_1.60.0          BiocParallel_1.34.2        
+    ## [21] csaw_1.34.0                 SummarizedExperiment_1.30.2
+    ## [23] Biobase_2.60.0              MatrixGenerics_1.12.3      
+    ## [25] matrixStats_1.0.0           Rsamtools_2.16.0           
+    ## [27] Biostrings_2.68.1           XVector_0.40.0             
+    ## [29] GenomicRanges_1.52.0        GenomeInfoDb_1.36.1        
+    ## [31] IRanges_2.34.1              S4Vectors_0.38.1           
+    ## [33] BiocGenerics_0.46.0         lubridate_1.9.2            
+    ## [35] forcats_1.0.0               stringr_1.5.0              
+    ## [37] dplyr_1.1.2                 purrr_1.0.2                
+    ## [39] readr_2.1.4                 tidyr_1.3.0                
+    ## [41] tibble_3.2.1                ggplot2_3.4.3              
+    ## [43] tidyverse_2.0.0            
     ## 
     ## loaded via a namespace (and not attached):
     ##   [1] ProtGenerics_1.32.0        bitops_1.0-7              
     ##   [3] httr_1.4.6                 RColorBrewer_1.1-3        
-    ##   [5] doParallel_1.0.17          InteractionSet_1.28.0     
-    ##   [7] tools_4.3.0                doRNG_1.8.6               
+    ##   [5] doParallel_1.0.17          InteractionSet_1.28.1     
+    ##   [7] tools_4.3.1                doRNG_1.8.6               
     ##   [9] backports_1.4.1            utf8_1.2.3                
     ##  [11] R6_2.5.1                   HDF5Array_1.28.1          
-    ##  [13] mgcv_1.8-42                lazyeval_0.2.2            
+    ##  [13] mgcv_1.9-0                 lazyeval_0.2.2            
     ##  [15] Gviz_1.44.0                rhdf5filters_1.12.1       
     ##  [17] GetoptLong_1.0.5           withr_2.5.0               
     ##  [19] prettyunits_1.1.1          gridExtra_2.3             
@@ -1420,67 +1415,67 @@ sessionInfo()
     ##  [27] askpass_1.1                foreign_0.8-84            
     ##  [29] siggenes_1.74.0            illuminaio_0.42.0         
     ##  [31] dichromat_2.0-0.1          scrime_1.3.5              
-    ##  [33] BSgenome_1.68.0            rstudioapi_0.14           
+    ##  [33] BSgenome_1.68.0            rstudioapi_0.15.0         
     ##  [35] RSQLite_2.3.1              generics_0.1.3            
     ##  [37] shape_1.4.6                BiocIO_1.10.0             
-    ##  [39] vroom_1.6.3                Matrix_1.5-4.1            
+    ##  [39] vroom_1.6.3                Matrix_1.6-1              
     ##  [41] interp_1.1-4               futile.logger_1.4.3       
-    ##  [43] fansi_1.0.4                lifecycle_1.0.3           
-    ##  [45] yaml_2.3.7                 rhdf5_2.44.0              
-    ##  [47] BiocFileCache_2.8.0        grid_4.3.0                
-    ##  [49] blob_1.2.4                 crayon_1.5.2              
-    ##  [51] lattice_0.21-8             ComplexUpset_1.3.3        
-    ##  [53] GenomicFeatures_1.52.0     annotate_1.78.0           
-    ##  [55] KEGGREST_1.40.0            pillar_1.9.0              
-    ##  [57] knitr_1.43                 ComplexHeatmap_2.16.0     
-    ##  [59] beanplot_1.3.1             metapod_1.8.0             
-    ##  [61] rjson_0.2.21               codetools_0.2-19          
-    ##  [63] data.table_1.14.8          vctrs_0.6.2               
-    ##  [65] png_0.1-8                  gtable_0.3.3              
-    ##  [67] cachem_1.0.8               xfun_0.39                 
-    ##  [69] S4Arrays_1.0.4             ggside_0.2.2              
+    ##  [43] fansi_1.0.4                abind_1.4-5               
+    ##  [45] lifecycle_1.0.3            yaml_2.3.7                
+    ##  [47] rhdf5_2.44.0               BiocFileCache_2.8.0       
+    ##  [49] grid_4.3.1                 blob_1.2.4                
+    ##  [51] crayon_1.5.2               lattice_0.21-8            
+    ##  [53] ComplexUpset_1.3.3         GenomicFeatures_1.52.1    
+    ##  [55] annotate_1.78.0            KEGGREST_1.40.0           
+    ##  [57] pillar_1.9.0               knitr_1.43                
+    ##  [59] ComplexHeatmap_2.16.0      beanplot_1.3.1            
+    ##  [61] metapod_1.8.0              rjson_0.2.21              
+    ##  [63] codetools_0.2-19           data.table_1.14.8         
+    ##  [65] vctrs_0.6.3                png_0.1-8                 
+    ##  [67] gtable_0.3.3               cachem_1.0.8              
+    ##  [69] xfun_0.40                  S4Arrays_1.0.5            
     ##  [71] survival_3.5-5             iterators_1.0.14          
     ##  [73] GenomicInteractions_1.34.0 nlme_3.1-162              
     ##  [75] bit64_4.0.5                progress_1.2.2            
     ##  [77] filelock_1.0.2             rprojroot_2.0.3           
     ##  [79] rpart_4.1.19               colorspace_2.1-0          
     ##  [81] DBI_1.1.3                  Hmisc_5.1-0               
-    ##  [83] nnet_7.3-18                tidyselect_1.2.0          
-    ##  [85] bit_4.0.5                  compiler_4.3.0            
-    ##  [87] curl_5.0.0                 htmlTable_2.4.1           
-    ##  [89] xml2_1.3.4                 DelayedArray_0.26.3       
+    ##  [83] nnet_7.3-19                tidyselect_1.2.0          
+    ##  [85] bit_4.0.5                  compiler_4.3.1            
+    ##  [87] curl_5.0.2                 htmlTable_2.4.1           
+    ##  [89] xml2_1.3.5                 DelayedArray_0.26.7       
     ##  [91] checkmate_2.2.0            quadprog_1.5-8            
-    ##  [93] rappdirs_0.3.3             digest_0.6.31             
-    ##  [95] rmarkdown_2.22             GEOquery_2.68.0           
-    ##  [97] htmltools_0.5.5            pkgconfig_2.0.3           
+    ##  [93] rappdirs_0.3.3             digest_0.6.33             
+    ##  [95] rmarkdown_2.24             GEOquery_2.68.0           
+    ##  [97] htmltools_0.5.6            pkgconfig_2.0.3           
     ##  [99] jpeg_0.1-10                base64enc_0.1-3           
-    ## [101] sparseMatrixStats_1.12.0   highr_0.10                
-    ## [103] dbplyr_2.3.2               fastmap_1.1.1             
+    ## [101] sparseMatrixStats_1.12.2   highr_0.10                
+    ## [103] dbplyr_2.3.3               fastmap_1.1.1             
     ## [105] ensembldb_2.24.0           rlang_1.1.1               
     ## [107] GlobalOptions_0.1.2        htmlwidgets_1.6.2         
-    ## [109] DelayedMatrixStats_1.22.0  EnrichedHeatmap_1.30.0    
+    ## [109] DelayedMatrixStats_1.22.5  EnrichedHeatmap_1.30.0    
     ## [111] farver_2.1.1               VariantAnnotation_1.46.0  
     ## [113] RCurl_1.98-1.12            Formula_1.2-5             
     ## [115] GenomeInfoDbData_1.2.10    Rhdf5lib_1.22.0           
-    ## [117] munsell_0.5.0              Rcpp_1.0.10               
+    ## [117] munsell_0.5.0              Rcpp_1.0.11               
     ## [119] stringi_1.7.12             zlibbioc_1.46.0           
     ## [121] MASS_7.3-60                plyr_1.8.8                
     ## [123] bumphunter_1.42.0          minfi_1.46.0              
-    ## [125] parallel_4.3.0             deldir_1.0-9              
+    ## [125] parallel_4.3.1             deldir_1.0-9              
     ## [127] multtest_2.56.0            hms_1.1.3                 
-    ## [129] circlize_0.4.15            locfit_1.5-9.7            
-    ## [131] igraph_1.4.3               rngtools_1.5.2            
-    ## [133] biomaRt_2.56.0             futile.options_1.0.1      
+    ## [129] circlize_0.4.15            locfit_1.5-9.8            
+    ## [131] igraph_1.5.1               rngtools_1.5.2            
+    ## [133] biomaRt_2.56.1             futile.options_1.0.1      
     ## [135] XML_3.99-0.14              evaluate_0.21             
     ## [137] latticeExtra_0.6-30        biovizBase_1.48.0         
     ## [139] lambda.r_1.2.4             tzdb_0.4.0                
     ## [141] foreach_1.5.2              tweenr_2.0.2              
-    ## [143] MatrixModels_0.5-1         openssl_2.0.6             
+    ## [143] MatrixModels_0.5-2         openssl_2.1.0             
     ## [145] polyclip_1.10-4            reshape_0.8.9             
     ## [147] clue_0.3-64                ggforce_0.4.1             
-    ## [149] broom_1.0.4                xtable_1.8-4              
+    ## [149] broom_1.0.5                xtable_1.8-4              
     ## [151] restfulr_0.0.15            AnnotationFilter_1.24.0   
-    ## [153] memoise_2.0.1              AnnotationDbi_1.62.1      
+    ## [153] memoise_2.0.1              AnnotationDbi_1.62.2      
     ## [155] GenomicAlignments_1.36.0   cluster_2.1.4             
     ## [157] timechange_0.2.0
 
