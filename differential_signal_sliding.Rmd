@@ -4,7 +4,6 @@ author:
 - name: Stevie Pederson
   affiliation: 
   - Black Ochre Data Laboratories, Telethon Kids Institute, Adelaide, Australia
-  - Dame Roma Mitchell Cancer Researc Laboratories, University of Adelaide
   - John Curtin School of Medical Research, Australian National University
   email: stephen.pederson.au@gmail.com
 package: extraChIPs
@@ -426,11 +425,11 @@ p-value is returned.
 
 ```{r merge-by-hmp}
 results_gr <- mergeByHMP(fit_gr, inc_cols = "overlaps_ref", merge_within = 120) %>% 
-  addDiffStatus(drop = TRUE)
-arrange(results_gr, hmp)[1:5]
+  addDiffStatus(drop = TRUE, sig_col = "hmPValue_fdr")
+arrange(results_gr, hmPValue)[1:5]
 ```
 
-In the above, we returned `r sum(results_gr$hmp_fdr < 0.05)` ranges which we 
+In the above, we returned `r sum(results_gr$hmPValue_fdr < 0.05)` ranges which we 
 might consider using the significance threshold $\alpha$ = 0.05.
 As is common, we can assess our results using an MA plot.
 However, given that testing is performed using sliding windows and merging 
@@ -459,13 +458,13 @@ A <- fit_gr %>%
   ggtitle("MA Plot: All Retained Sliding Windows")
 B <- results_gr %>% 
   as_tibble() %>% 
-  mutate(`FDR < 0.05` = hmp_fdr < 0.05) %>% 
+  mutate(`FDR < 0.05` = hmPValue_fdr < 0.05) %>% 
   ggplot(aes(logCPM, logFC)) +
   geom_point(aes(colour = `FDR < 0.05`), alpha = 0.6) +
   geom_smooth(se = FALSE, method = "loess") +
   geom_label_repel(
     aes(label = range, colour = `FDR < 0.05`),
-    data = . %>% dplyr::filter(hmp_fdr == min(hmp_fdr)),
+    data = . %>% dplyr::filter(hmPValue_fdr == min(hmPValue_fdr)),
     show.legend = FALSE
   ) +
   geom_label(
@@ -528,14 +527,14 @@ tmm_gr <- fitAssayDiff(
   filtcounts, design = X, fc = 1.2, norm = "TMM", asRanges = TRUE
 )
 tmm_results <- mergeByHMP(tmm_gr, inc_cols = "overlaps_ref", merge_within = 120) %>% 
-  addDiffStatus(drop = TRUE)
+  addDiffStatus(drop = TRUE, sig_col = "hmPValue_fdr")
 table(tmm_results$status)
 ```
 
 As might be expected, the results are highly concordant, with TMM-normalisation 
 providing a moderate improvement in statistical power, returning 
-`r sum(tmm_results$hmp_fdr < 0.05)` windows with evidence of differential 
-signal, instead of the initial `r sum(results_gr$hmp_fdr < 0.05)`.
+`r sum(tmm_results$hmPValue_fdr < 0.05)` windows with evidence of differential 
+signal, instead of the initial `r sum(results_gr$hmPValue_fdr < 0.05)`.
 Any of the normalisation methods taken by `edgeR::calcNormFactors()` can be 
 used here.
 
@@ -670,7 +669,7 @@ tmm_results <- mapByFeature(
   tmm_results, genes = gencode$gene,
   prom = select(promoters, gene_id, gene_name)
 )
-tmm_results %>% filter(hmp_fdr < 0.05) %>% arrange(hmp)
+tmm_results %>% filter(hmPValue_fdr < 0.05) %>% arrange(hmPValue)
 ```
 
 So now we have our regions showing differential signal, along with which gene 
@@ -688,7 +687,7 @@ tmm_results %>%
   geom_label_repel(
     aes(label = label),
     data = . %>% 
-      arrange(hmp) %>% 
+      arrange(hmPValue) %>% 
       dplyr::slice(1:10) %>% 
       mutate(
         label  = vapply(gene_name, paste, character(1), collapse = "; ") %>% 
@@ -728,7 +727,7 @@ factor which reflects the hierarchy with which the regions were defined.
 
 ```{r best-overlap}
 tmm_results$bestOverlap <- bestOverlap(tmm_results, regions) 
-filter(tmm_results, hmp_fdr < 0.05, bestOverlap == "promoter")
+filter(tmm_results, hmPValue_fdr < 0.05, bestOverlap == "promoter")
 ```
 
 Given the region column contains nicely formateed output, we can also use this
@@ -853,7 +852,7 @@ Let's check the coverage across the most highly-ranked region with default
 settings.
 
 ```{r set-gr}
-gr <- filter(tmm_results, hmp_fdr < 0.05, str_detect(bestOverlap, '^Prom'))[1]
+gr <- filter(tmm_results, hmPValue_fdr < 0.05, str_detect(bestOverlap, '^Prom'))[1]
 ```
 
 

@@ -469,7 +469,7 @@ ls_res <- fitAssayDiff(se, design = X, asRanges = TRUE)
 sum(ls_res$FDR < 0.05)
 ```
 
-    ## [1] 3
+    ## [1] 2
 
 TMM normalisation (Robinson and Oshlack 2010) is another common
 strategy, which relies on the data from all treatment groups being drawn
@@ -507,7 +507,7 @@ tmm_res <- fitAssayDiff(se, design = X, norm = "TMM", asRanges = TRUE, fc = 1.2)
 sum(tmm_res$FDR < 0.05)
 ```
 
-    ## [1] 7
+    ## [1] 6
 
 An MA-plot is a common way of inspecting results and in the following we
 use the original ‘union_peak’ in our labelling of points. This serves as
@@ -647,7 +647,7 @@ arrange(tmm_mapped_res, PValue)
     ##     [2]    chr10 79629641-79630271      * |      TRUE      TRUE         2
     ##     [3]    chr10 89407752-89408138      * |     FALSE      TRUE         1
     ##     [4]    chr10 52233596-52233998      * |      TRUE      TRUE         2
-    ##     [5]    chr10 91651138-91651433      * |     FALSE      TRUE         1
+    ##     [5]    chr10 79266991-79267392      * |     FALSE      TRUE         1
     ##     ...      ...               ...    ... .       ...       ...       ...
     ##   [184]    chr10 57899195-57899649      * |      TRUE      TRUE         2
     ##   [185]    chr10 79190987-79191351      * |     FALSE      TRUE         1
@@ -656,24 +656,24 @@ arrange(tmm_mapped_res, PValue)
     ##   [188]    chr10 95755308-95755721      * |      TRUE      TRUE         2
     ##               logFC    logCPM      PValue         FDR       p_mu0
     ##           <numeric> <numeric>   <numeric>   <numeric>   <numeric>
-    ##     [1]    1.871060   7.93229 3.32981e-24 6.26004e-22 5.86555e-30
-    ##     [2]    0.931608   8.06748 1.77568e-07 1.66914e-05 7.16573e-11
-    ##     [3]    1.570273   6.17416 6.05081e-07 3.79184e-05 6.73569e-08
-    ##     [4]    1.049765   6.68775 5.82639e-05 2.73840e-03 5.28527e-06
-    ##     [5]    1.539043   5.15469 1.94038e-04 7.29583e-03 6.91838e-05
+    ##     [1]    1.871060   7.93229 1.96127e-24 3.68718e-22 2.95129e-30
+    ##     [2]    0.931608   8.06748 1.57599e-07 1.48143e-05 5.78275e-11
+    ##     [3]    1.570273   6.17416 3.27580e-07 2.05283e-05 3.04629e-08
+    ##     [4]    1.049765   6.68775 4.96447e-05 2.33330e-03 4.10598e-06
+    ##     [5]    1.318949   5.55204 3.85436e-04 1.28635e-02 1.33227e-04
     ##     ...         ...       ...         ...         ...         ...
-    ##   [184]  0.01656860   6.74759    0.949645    0.970289    0.939137
-    ##   [185] -0.01280716   6.39247    0.963207    0.972684    0.958637
-    ##   [186] -0.02142115   9.32215    0.963659    0.972684    0.831820
-    ##   [187]  0.01237140   6.19732    0.967510    0.972684    0.963156
-    ##   [188] -0.00530365   5.86168    0.986505    0.986505    0.985630
+    ##   [184]  0.01656860   6.74759    0.949395    0.970034    0.938549
+    ##   [185] -0.01280716   6.39247    0.962608    0.971999    0.957671
+    ##   [186] -0.02142115   9.32215    0.966355    0.971999    0.827719
+    ##   [187]  0.01237140   6.19732    0.966829    0.971999    0.962172
+    ##   [188] -0.00530365   5.86168    0.986390    0.986390    0.985491
     ##                                            gene_id
     ##                                    <CharacterList>
     ##     [1]                       ENSG00000108179.14_6
     ##     [2]                      ENSG00000151208.17_11
     ##     [3]   ENSG00000225913.2_9,ENSG00000196566.2_10
     ##     [4] ENSG00000198964.14_10,ENSG00000225303.2_10
-    ##     [5]                        ENSG00000280560.3_9
+    ##     [5]                      ENSG00000156113.25_17
     ##     ...                                        ...
     ##   [184]                                           
     ##   [185]                      ENSG00000156113.25_17
@@ -686,7 +686,7 @@ arrange(tmm_mapped_res, PValue)
     ##     [2]                            DLG5 Increased
     ##     [3] ENSG00000225913,ENSG00000196566 Increased
     ##     [4]           SGMS1,ENSG00000225303 Increased
-    ##     [5]                       LINC01374 Increased
+    ##     [5]                          KCNMA1 Increased
     ##     ...                             ...       ...
     ##   [184]                                 Unchanged
     ##   [185]                          KCNMA1 Unchanged
@@ -767,7 +767,7 @@ gr
     ##   [1]    chr10 81101906-81102928      * |      TRUE      TRUE         2
     ##           logFC    logCPM      PValue         FDR       p_mu0
     ##       <numeric> <numeric>   <numeric>   <numeric>   <numeric>
-    ##   [1]   1.87106   7.93229 3.32981e-24 6.26004e-22 5.86555e-30
+    ##   [1]   1.87106   7.93229 1.96127e-24 3.68718e-22 2.95129e-30
     ##                    gene_id       gene_name    status
     ##            <CharacterList> <CharacterList>  <factor>
     ##   [1] ENSG00000108179.14_6            PPIF Increased
@@ -915,13 +915,13 @@ in the sliding windows vignette.
 sessionInfo()
 ```
 
-    ## R version 4.3.1 (2023-06-16)
-    ## Platform: x86_64-pc-linux-gnu (64-bit)
+    ## R version 4.4.0 (2024-04-24)
+    ## Platform: x86_64-pc-linux-gnu
     ## Running under: Ubuntu 20.04.6 LTS
     ## 
     ## Matrix products: default
-    ## BLAS:   /usr/lib/x86_64-linux-gnu/blas/libblas.so.3.9.0 
-    ## LAPACK: /usr/lib/x86_64-linux-gnu/lapack/liblapack.so.3.9.0
+    ## BLAS:   /usr/lib/x86_64-linux-gnu/openblas-pthread/libblas.so.3 
+    ## LAPACK: /usr/lib/x86_64-linux-gnu/openblas-pthread/liblapack.so.3;  LAPACK version 3.9.0
     ## 
     ## locale:
     ##  [1] LC_CTYPE=en_AU.UTF-8       LC_NUMERIC=C              
@@ -939,111 +939,111 @@ sessionInfo()
     ## [8] base     
     ## 
     ## other attached packages:
-    ##  [1] quantro_1.34.0              here_1.0.1                 
-    ##  [3] ggrepel_0.9.3               glue_1.6.2                 
-    ##  [5] scales_1.2.1                plyranges_1.20.0           
-    ##  [7] extraChIPs_1.5.14           ggside_0.2.2               
-    ##  [9] patchwork_1.1.2             edgeR_3.42.4               
-    ## [11] limma_3.56.2                rtracklayer_1.60.0         
-    ## [13] BiocParallel_1.34.2         csaw_1.34.0                
-    ## [15] SummarizedExperiment_1.30.2 Biobase_2.60.0             
-    ## [17] MatrixGenerics_1.12.3       matrixStats_1.0.0          
-    ## [19] Rsamtools_2.16.0            Biostrings_2.68.1          
-    ## [21] XVector_0.40.0              GenomicRanges_1.52.0       
-    ## [23] GenomeInfoDb_1.36.1         IRanges_2.34.1             
-    ## [25] S4Vectors_0.38.1            BiocGenerics_0.46.0        
-    ## [27] lubridate_1.9.2             forcats_1.0.0              
-    ## [29] stringr_1.5.0               dplyr_1.1.2                
-    ## [31] purrr_1.0.2                 readr_2.1.4                
-    ## [33] tidyr_1.3.0                 tibble_3.2.1               
-    ## [35] ggplot2_3.4.3               tidyverse_2.0.0            
+    ##  [1] quantro_1.40.0              here_1.0.1                 
+    ##  [3] ggrepel_0.9.6               glue_1.8.0                 
+    ##  [5] scales_1.3.0                plyranges_1.26.0           
+    ##  [7] extraChIPs_1.11.1           ggside_0.3.1               
+    ##  [9] patchwork_1.3.0             edgeR_4.4.1                
+    ## [11] limma_3.62.1                rtracklayer_1.66.0         
+    ## [13] BiocParallel_1.40.0         csaw_1.40.0                
+    ## [15] SummarizedExperiment_1.36.0 Biobase_2.66.0             
+    ## [17] MatrixGenerics_1.18.0       matrixStats_1.5.0          
+    ## [19] Rsamtools_2.22.0            Biostrings_2.74.1          
+    ## [21] XVector_0.46.0              GenomicRanges_1.58.0       
+    ## [23] GenomeInfoDb_1.42.1         IRanges_2.40.1             
+    ## [25] S4Vectors_0.44.0            BiocGenerics_0.52.0        
+    ## [27] lubridate_1.9.4             forcats_1.0.0              
+    ## [29] stringr_1.5.1               dplyr_1.1.4                
+    ## [31] purrr_1.0.2                 readr_2.1.5                
+    ## [33] tidyr_1.3.1                 tibble_3.2.1               
+    ## [35] ggplot2_3.5.1               tidyverse_2.0.0            
     ## 
     ## loaded via a namespace (and not attached):
-    ##   [1] splines_4.3.1              BiocIO_1.10.0             
-    ##   [3] bitops_1.0-7               filelock_1.0.2            
-    ##   [5] polyclip_1.10-4            preprocessCore_1.62.1     
-    ##   [7] XML_3.99-0.14              rpart_4.1.19              
-    ##   [9] lifecycle_1.0.3            doParallel_1.0.17         
-    ##  [11] rprojroot_2.0.3            vroom_1.6.3               
-    ##  [13] base64_2.0.1               lattice_0.21-8            
-    ##  [15] ensembldb_2.24.0           MASS_7.3-60               
-    ##  [17] scrime_1.3.5               backports_1.4.1           
-    ##  [19] magrittr_2.0.3             minfi_1.46.0              
-    ##  [21] Hmisc_5.1-0                rmarkdown_2.24            
-    ##  [23] yaml_2.3.7                 metapod_1.8.0             
-    ##  [25] doRNG_1.8.6                askpass_1.1               
-    ##  [27] Gviz_1.44.0                DBI_1.1.3                 
-    ##  [29] RColorBrewer_1.1-3         abind_1.4-5               
-    ##  [31] zlibbioc_1.46.0            quadprog_1.5-8            
-    ##  [33] AnnotationFilter_1.24.0    biovizBase_1.48.0         
-    ##  [35] RCurl_1.98-1.12            nnet_7.3-19               
-    ##  [37] VariantAnnotation_1.46.0   tweenr_2.0.2              
-    ##  [39] rappdirs_0.3.3             circlize_0.4.15           
-    ##  [41] GenomeInfoDbData_1.2.10    genefilter_1.82.1         
-    ##  [43] annotate_1.78.0            DelayedMatrixStats_1.22.5 
-    ##  [45] codetools_0.2-19           DelayedArray_0.26.7       
-    ##  [47] xml2_1.3.5                 ggforce_0.4.1             
-    ##  [49] tidyselect_1.2.0           shape_1.4.6               
-    ##  [51] futile.logger_1.4.3        farver_2.1.1              
-    ##  [53] beanplot_1.3.1             ComplexUpset_1.3.3        
-    ##  [55] BiocFileCache_2.8.0        base64enc_0.1-3           
-    ##  [57] illuminaio_0.42.0          GenomicAlignments_1.36.0  
-    ##  [59] multtest_2.56.0            GetoptLong_1.0.5          
-    ##  [61] Formula_1.2-5              survival_3.5-5            
-    ##  [63] iterators_1.0.14           foreach_1.5.2             
-    ##  [65] tools_4.3.1                progress_1.2.2            
-    ##  [67] Rcpp_1.0.11                gridExtra_2.3             
-    ##  [69] mgcv_1.9-0                 xfun_0.40                 
-    ##  [71] HDF5Array_1.28.1           withr_2.5.0               
-    ##  [73] formatR_1.14               fastmap_1.1.1             
-    ##  [75] rhdf5filters_1.12.1        latticeExtra_0.6-30       
-    ##  [77] fansi_1.0.4                openssl_2.1.0             
-    ##  [79] digest_0.6.33              timechange_0.2.0          
-    ##  [81] R6_2.5.1                   colorspace_2.1-0          
-    ##  [83] jpeg_0.1-10                dichromat_2.0-0.1         
-    ##  [85] biomaRt_2.56.1             RSQLite_2.3.1             
-    ##  [87] utf8_1.2.3                 generics_0.1.3            
-    ##  [89] data.table_1.14.8          prettyunits_1.1.1         
-    ##  [91] InteractionSet_1.28.1      httr_1.4.6                
-    ##  [93] htmlwidgets_1.6.2          S4Arrays_1.0.5            
-    ##  [95] pkgconfig_2.0.3            gtable_0.3.3              
-    ##  [97] blob_1.2.4                 siggenes_1.74.0           
-    ##  [99] ComplexHeatmap_2.16.0      htmltools_0.5.6           
-    ## [101] ProtGenerics_1.32.0        clue_0.3-64               
-    ## [103] png_0.1-8                  knitr_1.43                
-    ## [105] lambda.r_1.2.4             rstudioapi_0.15.0         
-    ## [107] tzdb_0.4.0                 rjson_0.2.21              
-    ## [109] nlme_3.1-162               checkmate_2.2.0           
-    ## [111] curl_5.0.2                 bumphunter_1.42.0         
-    ## [113] rhdf5_2.44.0               cachem_1.0.8              
-    ## [115] GlobalOptions_0.1.2        parallel_4.3.1            
-    ## [117] foreign_0.8-84             AnnotationDbi_1.62.2      
-    ## [119] restfulr_0.0.15            GEOquery_2.68.0           
-    ## [121] reshape_0.8.9              pillar_1.9.0              
-    ## [123] grid_4.3.1                 vctrs_0.6.3               
-    ## [125] dbplyr_2.3.3               xtable_1.8-4              
-    ## [127] cluster_2.1.4              htmlTable_2.4.1           
-    ## [129] evaluate_0.21              VennDiagram_1.7.3         
-    ## [131] EnrichedHeatmap_1.30.0     GenomicFeatures_1.52.1    
-    ## [133] cli_3.6.1                  locfit_1.5-9.8            
-    ## [135] compiler_4.3.1             futile.options_1.0.1      
-    ## [137] rngtools_1.5.2             rlang_1.1.1               
-    ## [139] crayon_1.5.2               labeling_0.4.2            
-    ## [141] nor1mix_1.3-0              mclust_6.0.0              
-    ## [143] interp_1.1-4               plyr_1.8.8                
-    ## [145] pander_0.6.5               stringi_1.7.12            
-    ## [147] deldir_1.0-9               munsell_0.5.0             
-    ## [149] lazyeval_0.2.2             Matrix_1.6-1              
-    ## [151] BSgenome_1.68.0            hms_1.1.3                 
-    ## [153] sparseMatrixStats_1.12.2   bit64_4.0.5               
-    ## [155] Rhdf5lib_1.22.0            KEGGREST_1.40.0           
-    ## [157] highr_0.10                 igraph_1.5.1              
-    ## [159] broom_1.0.5                memoise_2.0.1             
-    ## [161] bit_4.0.5                  GenomicInteractions_1.34.0
+    ##   [1] ProtGenerics_1.38.0       bitops_1.0-9             
+    ##   [3] httr_1.4.7                RColorBrewer_1.1-3       
+    ##   [5] doParallel_1.0.17         InteractionSet_1.34.0    
+    ##   [7] tools_4.4.0               doRNG_1.8.6              
+    ##   [9] backports_1.5.0           utf8_1.2.4               
+    ##  [11] R6_2.5.1                  HDF5Array_1.34.0         
+    ##  [13] lazyeval_0.2.2            mgcv_1.9-1               
+    ##  [15] Gviz_1.50.0               rhdf5filters_1.18.0      
+    ##  [17] GetoptLong_1.0.5          withr_3.0.2              
+    ##  [19] prettyunits_1.2.0         gridExtra_2.3            
+    ##  [21] base64_2.0.2              VennDiagram_1.7.3        
+    ##  [23] preprocessCore_1.68.0     cli_3.6.3                
+    ##  [25] formatR_1.14              labeling_0.4.3           
+    ##  [27] genefilter_1.88.0         askpass_1.2.1            
+    ##  [29] foreign_0.8-89            siggenes_1.80.0          
+    ##  [31] illuminaio_0.48.0         rentrez_1.2.3            
+    ##  [33] dichromat_2.0-0.1         scrime_1.3.5             
+    ##  [35] BSgenome_1.74.0           rstudioapi_0.17.1        
+    ##  [37] RSQLite_2.3.9             generics_0.1.3           
+    ##  [39] shape_1.4.6.1             BiocIO_1.16.0            
+    ##  [41] vroom_1.6.5               interp_1.1-6             
+    ##  [43] Matrix_1.7-1              futile.logger_1.4.3      
+    ##  [45] abind_1.4-8               lifecycle_1.0.4          
+    ##  [47] yaml_2.3.10               rhdf5_2.50.1             
+    ##  [49] SparseArray_1.6.0         BiocFileCache_2.14.0     
+    ##  [51] grid_4.4.0                blob_1.2.4               
+    ##  [53] crayon_1.5.3              lattice_0.22-6           
+    ##  [55] ComplexUpset_1.3.3        GenomicFeatures_1.58.0   
+    ##  [57] annotate_1.84.0           KEGGREST_1.46.0          
+    ##  [59] pillar_1.10.1             knitr_1.49               
+    ##  [61] ComplexHeatmap_2.22.0     beanplot_1.3.1           
+    ##  [63] metapod_1.14.0            rjson_0.2.23             
+    ##  [65] codetools_0.2-20          data.table_1.16.4        
+    ##  [67] vctrs_0.6.5               png_0.1-8                
+    ##  [69] gtable_0.3.6              cachem_1.1.0             
+    ##  [71] xfun_0.50                 S4Arrays_1.6.0           
+    ##  [73] survival_3.8-3            iterators_1.0.14         
+    ##  [75] statmod_1.5.0             nlme_3.1-166             
+    ##  [77] bit64_4.5.2               progress_1.2.3           
+    ##  [79] filelock_1.0.3            rprojroot_2.0.4          
+    ##  [81] nor1mix_1.3-3             rpart_4.1.24             
+    ##  [83] colorspace_2.1-1          DBI_1.2.3                
+    ##  [85] Hmisc_5.2-2               nnet_7.3-20              
+    ##  [87] tidyselect_1.2.1          bit_4.5.0.1              
+    ##  [89] compiler_4.4.0            curl_6.1.0               
+    ##  [91] httr2_1.0.7               htmlTable_2.4.3          
+    ##  [93] xml2_1.3.6                DelayedArray_0.32.0      
+    ##  [95] checkmate_2.3.2           quadprog_1.5-8           
+    ##  [97] rappdirs_0.3.3            digest_0.6.37            
+    ##  [99] rmarkdown_2.29            GEOquery_2.74.0          
+    ## [101] jpeg_0.1-10               htmltools_0.5.8.1        
+    ## [103] pkgconfig_2.0.3           base64enc_0.1-3          
+    ## [105] sparseMatrixStats_1.18.0  dbplyr_2.5.0             
+    ## [107] fastmap_1.2.0             ensembldb_2.30.0         
+    ## [109] rlang_1.1.4               GlobalOptions_0.1.2      
+    ## [111] htmlwidgets_1.6.4         UCSC.utils_1.2.0         
+    ## [113] DelayedMatrixStats_1.28.0 EnrichedHeatmap_1.36.0   
+    ## [115] farver_2.1.2              jsonlite_1.8.9           
+    ## [117] mclust_6.1.1              VariantAnnotation_1.52.0 
+    ## [119] RCurl_1.98-1.16           magrittr_2.0.3           
+    ## [121] Formula_1.2-5             GenomeInfoDbData_1.2.13  
+    ## [123] Rhdf5lib_1.28.0           munsell_0.5.1            
+    ## [125] Rcpp_1.0.13-1             stringi_1.8.4            
+    ## [127] zlibbioc_1.52.0           MASS_7.3-65              
+    ## [129] plyr_1.8.9                bumphunter_1.48.0        
+    ## [131] minfi_1.52.1              parallel_4.4.0           
+    ## [133] deldir_2.0-4              splines_4.4.0            
+    ## [135] pander_0.6.5              multtest_2.62.0          
+    ## [137] hms_1.1.3                 circlize_0.4.16          
+    ## [139] locfit_1.5-9.10           rngtools_1.5.2           
+    ## [141] biomaRt_2.62.0            futile.options_1.0.1     
+    ## [143] XML_3.99-0.18             evaluate_1.0.3           
+    ## [145] latticeExtra_0.6-30       biovizBase_1.54.0        
+    ## [147] lambda.r_1.2.4            tzdb_0.4.0               
+    ## [149] foreach_1.5.2             openssl_2.3.1            
+    ## [151] reshape_0.8.9             clue_0.3-66              
+    ## [153] xtable_1.8-4              restfulr_0.0.15          
+    ## [155] AnnotationFilter_1.30.0   memoise_2.0.1            
+    ## [157] AnnotationDbi_1.68.0      GenomicAlignments_1.42.0 
+    ## [159] cluster_2.1.8.1           timechange_0.3.0
 
 ## References
 
-<div id="refs" class="references csl-bib-body hanging-indent">
+<div id="refs" class="references csl-bib-body hanging-indent"
+entry-spacing="0">
 
 <div id="ref-gviz" class="csl-entry">
 

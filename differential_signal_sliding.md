@@ -484,8 +484,8 @@ the original window with the lowest p-value is returned.
 
 ``` r
 results_gr <- mergeByHMP(fit_gr, inc_cols = "overlaps_ref", merge_within = 120) %>% 
-  addDiffStatus(drop = TRUE)
-arrange(results_gr, hmp)[1:5]
+  addDiffStatus(drop = TRUE, sig_col = "hmPValue_fdr")
+arrange(results_gr, hmPValue)[1:5]
 ```
 
     ## GRanges object with 5 ranges and 10 metadata columns:
@@ -496,20 +496,20 @@ arrange(results_gr, hmp)[1:5]
     ##   [3]    chr10 74008161-74008760      * |        13         2         0
     ##   [4]    chr10 63858841-63859040      * |         3         1         0
     ##   [5]    chr10 63859401-63859760      * |         7         1         0
-    ##       overlaps_ref            keyval_range    logCPM     logFC         hmp
+    ##       overlaps_ref            keyval_range    logCPM     logFC    hmPValue
     ##          <logical>               <GRanges> <numeric> <numeric>   <numeric>
-    ##   [1]         TRUE chr10:79257761-79257880   7.01563   1.82950 2.08382e-12
-    ##   [2]         TRUE chr10:43689681-43689800   6.49125   1.78743 8.37664e-09
-    ##   [3]         TRUE chr10:74008441-74008560   6.48379   1.81692 9.27730e-09
-    ##   [4]         TRUE chr10:63858881-63859000   5.98361   1.75311 6.38262e-07
-    ##   [5]         TRUE chr10:63859601-63859720   5.98163   1.82260 1.02640e-06
-    ##           hmp_fdr    status
-    ##         <numeric>  <factor>
-    ##   [1] 1.49827e-09 Increased
-    ##   [2] 2.22346e-06 Increased
-    ##   [3] 2.22346e-06 Increased
-    ##   [4] 1.14728e-04 Increased
-    ##   [5] 1.47597e-04 Increased
+    ##   [1]         TRUE chr10:79257761-79257880   7.01435   1.83122 2.02577e-12
+    ##   [2]         TRUE chr10:43689681-43689800   6.49519   1.78759 7.35692e-09
+    ##   [3]         TRUE chr10:74008441-74008560   6.48398   1.81788 8.52214e-09
+    ##   [4]         TRUE chr10:63858881-63859000   5.98356   1.75334 6.06779e-07
+    ##   [5]         TRUE chr10:63859601-63859720   5.98158   1.82286 9.79178e-07
+    ##       hmPValue_fdr    status
+    ##          <numeric>  <factor>
+    ##   [1]  1.45653e-09 Increased
+    ##   [2]  2.04247e-06 Increased
+    ##   [3]  2.04247e-06 Increased
+    ##   [4]  1.09068e-04 Increased
+    ##   [5]  1.40806e-04 Increased
     ##   -------
     ##   seqinfo: 24 sequences from GRCh37 genome
 
@@ -542,13 +542,13 @@ A <- fit_gr %>%
   ggtitle("MA Plot: All Retained Sliding Windows")
 B <- results_gr %>% 
   as_tibble() %>% 
-  mutate(`FDR < 0.05` = hmp_fdr < 0.05) %>% 
+  mutate(`FDR < 0.05` = hmPValue_fdr < 0.05) %>% 
   ggplot(aes(logCPM, logFC)) +
   geom_point(aes(colour = `FDR < 0.05`), alpha = 0.6) +
   geom_smooth(se = FALSE, method = "loess") +
   geom_label_repel(
     aes(label = range, colour = `FDR < 0.05`),
-    data = . %>% dplyr::filter(hmp_fdr == min(hmp_fdr)),
+    data = . %>% dplyr::filter(hmPValue_fdr == min(hmPValue_fdr)),
     show.legend = FALSE
   ) +
   geom_label(
@@ -630,7 +630,7 @@ tmm_gr <- fitAssayDiff(
   filtcounts, design = X, fc = 1.2, norm = "TMM", asRanges = TRUE
 )
 tmm_results <- mergeByHMP(tmm_gr, inc_cols = "overlaps_ref", merge_within = 120) %>% 
-  addDiffStatus(drop = TRUE)
+  addDiffStatus(drop = TRUE, sig_col = "hmPValue_fdr")
 table(tmm_results$status)
 ```
 
@@ -826,7 +826,7 @@ tmm_results <- mapByFeature(
   tmm_results, genes = gencode$gene,
   prom = select(promoters, gene_id, gene_name)
 )
-tmm_results %>% filter(hmp_fdr < 0.05) %>% arrange(hmp)
+tmm_results %>% filter(hmPValue_fdr < 0.05) %>% arrange(hmPValue)
 ```
 
     ## GRanges object with 21 ranges and 13 metadata columns:
@@ -843,32 +843,32 @@ tmm_results %>% filter(hmp_fdr < 0.05) %>% arrange(hmp)
     ##   [19]    chr10 90615361-90615640      * |         4         2         0
     ##   [20]    chr10 63696921-63697240      * |         6         3         0
     ##   [21]    chr10 74878001-74878360      * |         7         3         0
-    ##        overlaps_ref            keyval_range    logCPM     logFC         hmp
+    ##        overlaps_ref            keyval_range    logCPM     logFC    hmPValue
     ##           <logical>               <GRanges> <numeric> <numeric>   <numeric>
-    ##    [1]         TRUE chr10:79257761-79257880   7.01952   1.85180 7.03850e-13
-    ##    [2]         TRUE chr10:43689681-43689800   6.49977   1.80954 4.86665e-09
-    ##    [3]         TRUE chr10:74008441-74008560   6.48714   1.84026 5.42397e-09
-    ##    [4]         TRUE chr10:63858881-63859000   5.98620   1.77565 4.36934e-07
-    ##    [5]         TRUE chr10:63859601-63859720   5.98356   1.84569 6.93451e-07
+    ##    [1]         TRUE chr10:79257761-79257880   7.01785   1.85407 7.10128e-13
+    ##    [2]         TRUE chr10:43689681-43689800   6.50559   1.80937 4.03899e-09
+    ##    [3]         TRUE chr10:74008441-74008560   6.48741   1.84139 4.72109e-09
+    ##    [4]         TRUE chr10:63858881-63859000   5.98620   1.77598 4.23853e-07
+    ##    [5]         TRUE chr10:63859601-63859720   5.98355   1.84587 6.76467e-07
     ##    ...          ...                     ...       ...       ...         ...
-    ##   [17]         TRUE chr10:79307441-79307560   6.44973   1.15029 0.000577866
-    ##   [18]         TRUE chr10:74015201-74015320   6.13914   1.26214 0.000589876
-    ##   [19]         TRUE chr10:90615361-90615480   5.97256   1.14085 0.000840392
-    ##   [20]         TRUE chr10:63697121-63697240   6.00583   1.11174 0.001117497
-    ##   [21]         TRUE chr10:74878201-74878320   6.19336   1.05547 0.001426818
-    ##            hmp_fdr    status       tss               gene_id       gene_name
-    ##          <numeric>  <factor> <logical>       <CharacterList> <CharacterList>
-    ##    [1] 5.06068e-10 Increased     FALSE ENSG00000156113.25_17          KCNMA1
-    ##    [2] 1.29994e-06 Increased     FALSE ENSG00000198915.12_14        RASGEF1A
-    ##    [3] 1.29994e-06 Increased     FALSE   ENSG00000166295.9_6         ANAPC16
-    ##    [4] 7.85389e-05 Increased     FALSE ENSG00000150347.17_12          ARID5B
-    ##    [5] 9.97183e-05 Increased     FALSE ENSG00000150347.17_12          ARID5B
-    ##    ...         ...       ...       ...                   ...             ...
-    ##   [17]   0.0235623 Increased     FALSE ENSG00000156113.25_17          KCNMA1
-    ##   [18]   0.0235623 Increased     FALSE   ENSG00000289506.2_2 ENSG00000289506
-    ##   [19]   0.0318022 Increased     FALSE   ENSG00000152766.6_8         ANKRD22
-    ##   [20]   0.0401740 Increased     FALSE ENSG00000150347.17_12          ARID5B
-    ##   [21]   0.0488515 Increased     FALSE  ENSG00000166321.14_7          NUDT13
+    ##   [17]         TRUE chr10:79307441-79307560   6.44981   1.15122 0.000535450
+    ##   [18]         TRUE chr10:74015201-74015320   6.13949   1.26308 0.000560969
+    ##   [19]         TRUE chr10:90615361-90615480   5.97248   1.14120 0.000818266
+    ##   [20]         TRUE chr10:63697121-63697240   6.00592   1.11146 0.001097321
+    ##   [21]         TRUE chr10:74878201-74878320   6.19350   1.05462 0.001387768
+    ##        hmPValue_fdr    status       tss               gene_id       gene_name
+    ##           <numeric>  <factor> <logical>       <CharacterList> <CharacterList>
+    ##    [1]  5.10582e-10 Increased     FALSE ENSG00000156113.25_17          KCNMA1
+    ##    [2]  1.13149e-06 Increased     FALSE ENSG00000198915.12_14        RASGEF1A
+    ##    [3]  1.13149e-06 Increased     FALSE   ENSG00000166295.9_6         ANAPC16
+    ##    [4]  7.61876e-05 Increased     FALSE ENSG00000150347.17_12          ARID5B
+    ##    [5]  9.52983e-05 Increased     FALSE ENSG00000150347.17_12          ARID5B
+    ##    ...          ...       ...       ...                   ...             ...
+    ##   [17]    0.0224076 Increased     FALSE ENSG00000156113.25_17          KCNMA1
+    ##   [18]    0.0224076 Increased     FALSE   ENSG00000289506.2_2 ENSG00000289506
+    ##   [19]    0.0309649 Increased     FALSE   ENSG00000152766.6_8         ANKRD22
+    ##   [20]    0.0394487 Increased     FALSE ENSG00000150347.17_12          ARID5B
+    ##   [21]    0.0475145 Increased     FALSE  ENSG00000166321.14_7          NUDT13
     ##   -------
     ##   seqinfo: 24 sequences from GRCh37 genome
 
@@ -886,7 +886,7 @@ tmm_results %>%
   geom_label_repel(
     aes(label = label),
     data = . %>% 
-      arrange(hmp) %>% 
+      arrange(hmPValue) %>% 
       dplyr::slice(1:10) %>% 
       mutate(
         label  = vapply(gene_name, paste, character(1), collapse = "; ") %>% 
@@ -1007,26 +1007,30 @@ regions were defined.
 
 ``` r
 tmm_results$bestOverlap <- bestOverlap(tmm_results, regions) 
-filter(tmm_results, hmp_fdr < 0.05, bestOverlap == "promoter")
+filter(tmm_results, hmPValue_fdr < 0.05, bestOverlap == "promoter")
 ```
 
     ## GRanges object with 2 ranges and 14 metadata columns:
     ##       seqnames            ranges strand | n_windows      n_up    n_down
     ##          <Rle>         <IRanges>  <Rle> | <integer> <integer> <integer>
     ##   [1]    chr10 76779561-76780200      * |        14         4         0
-    ##   [2]    chr10 79623321-79635960      * |       314        13         0
-    ##       overlaps_ref            keyval_range    logCPM     logFC         hmp
+    ##   [2]    chr10 79623321-79635960      * |       314        14         0
+    ##       overlaps_ref            keyval_range    logCPM     logFC    hmPValue
     ##          <logical>               <GRanges> <numeric> <numeric>   <numeric>
-    ##   [1]         TRUE chr10:76779721-76779840   6.20849  1.242960 0.000189944
-    ##   [2]         TRUE chr10:79630321-79630440   7.70034  0.904713 0.000110317
-    ##          hmp_fdr    status       tss                                   gene_id
-    ##        <numeric>  <factor> <logical>                           <CharacterList>
-    ##   [1] 0.00910467 Increased     FALSE                     ENSG00000156650.14_17
-    ##   [2] 0.00566555 Increased      TRUE ENSG00000204049.1_8,ENSG00000151208.17_11
-    ##                  gene_name bestOverlap
-    ##            <CharacterList> <character>
-    ##   [1]                KAT6B    promoter
-    ##   [2] ENSG00000204049,DLG5    promoter
+    ##   [1]         TRUE chr10:76779721-76779840   6.20895  1.242766 0.000180232
+    ##   [2]         TRUE chr10:79630321-79630440   7.70149  0.904096 0.000115948
+    ##       hmPValue_fdr    status       tss
+    ##          <numeric>  <factor> <logical>
+    ##   [1]   0.00863910 Increased     FALSE
+    ##   [2]   0.00595476 Increased      TRUE
+    ##                                         gene_id            gene_name
+    ##                                 <CharacterList>      <CharacterList>
+    ##   [1]                     ENSG00000156650.14_17                KAT6B
+    ##   [2] ENSG00000204049.1_8,ENSG00000151208.17_11 ENSG00000204049,DLG5
+    ##       bestOverlap
+    ##       <character>
+    ##   [1]    promoter
+    ##   [2]    promoter
     ##   -------
     ##   seqinfo: 24 sequences from GRCh37 genome
 
@@ -1192,7 +1196,7 @@ Let’s check the coverage across the most highly-ranked region with
 default settings.
 
 ``` r
-gr <- filter(tmm_results, hmp_fdr < 0.05, str_detect(bestOverlap, '^Prom'))[1]
+gr <- filter(tmm_results, hmPValue_fdr < 0.05, str_detect(bestOverlap, '^Prom'))[1]
 ```
 
 The most important option to consider when showing coverage is whether
@@ -1351,13 +1355,13 @@ HFGC components.
 sessionInfo()
 ```
 
-    ## R version 4.3.1 (2023-06-16)
-    ## Platform: x86_64-pc-linux-gnu (64-bit)
+    ## R version 4.4.0 (2024-04-24)
+    ## Platform: x86_64-pc-linux-gnu
     ## Running under: Ubuntu 20.04.6 LTS
     ## 
     ## Matrix products: default
-    ## BLAS:   /usr/lib/x86_64-linux-gnu/blas/libblas.so.3.9.0 
-    ## LAPACK: /usr/lib/x86_64-linux-gnu/lapack/liblapack.so.3.9.0
+    ## BLAS:   /usr/lib/x86_64-linux-gnu/openblas-pthread/libblas.so.3 
+    ## LAPACK: /usr/lib/x86_64-linux-gnu/openblas-pthread/liblapack.so.3;  LAPACK version 3.9.0
     ## 
     ## locale:
     ##  [1] LC_CTYPE=en_AU.UTF-8       LC_NUMERIC=C              
@@ -1371,117 +1375,112 @@ sessionInfo()
     ## tzcode source: system (glibc)
     ## 
     ## attached base packages:
-    ## [1] splines   stats4    stats     graphics  grDevices utils     datasets 
-    ## [8] methods   base     
+    ## [1] stats4    stats     graphics  grDevices utils     datasets  methods  
+    ## [8] base     
     ## 
     ## other attached packages:
-    ##  [1] ggrepel_0.9.3               cqn_1.46.0                 
-    ##  [3] quantreg_5.96               SparseM_1.81               
-    ##  [5] preprocessCore_1.62.1       nor1mix_1.3-0              
-    ##  [7] mclust_6.0.0                quantro_1.34.0             
-    ##  [9] magrittr_2.0.3              here_1.0.1                 
-    ## [11] glue_1.6.2                  scales_1.2.1               
-    ## [13] plyranges_1.20.0            extraChIPs_1.5.14          
-    ## [15] ggside_0.2.2                patchwork_1.1.2            
-    ## [17] edgeR_3.42.4                limma_3.56.2               
-    ## [19] rtracklayer_1.60.0          BiocParallel_1.34.2        
-    ## [21] csaw_1.34.0                 SummarizedExperiment_1.30.2
-    ## [23] Biobase_2.60.0              MatrixGenerics_1.12.3      
-    ## [25] matrixStats_1.0.0           Rsamtools_2.16.0           
-    ## [27] Biostrings_2.68.1           XVector_0.40.0             
-    ## [29] GenomicRanges_1.52.0        GenomeInfoDb_1.36.1        
-    ## [31] IRanges_2.34.1              S4Vectors_0.38.1           
-    ## [33] BiocGenerics_0.46.0         lubridate_1.9.2            
-    ## [35] forcats_1.0.0               stringr_1.5.0              
-    ## [37] dplyr_1.1.2                 purrr_1.0.2                
-    ## [39] readr_2.1.4                 tidyr_1.3.0                
-    ## [41] tibble_3.2.1                ggplot2_3.4.3              
-    ## [43] tidyverse_2.0.0            
+    ##  [1] ggrepel_0.9.6               cqn_1.52.0                 
+    ##  [3] mclust_6.1.1                quantro_1.40.0             
+    ##  [5] magrittr_2.0.3              here_1.0.1                 
+    ##  [7] glue_1.8.0                  scales_1.3.0               
+    ##  [9] plyranges_1.26.0            extraChIPs_1.11.1          
+    ## [11] ggside_0.3.1                patchwork_1.3.0            
+    ## [13] edgeR_4.4.1                 limma_3.62.1               
+    ## [15] rtracklayer_1.66.0          BiocParallel_1.40.0        
+    ## [17] csaw_1.40.0                 SummarizedExperiment_1.36.0
+    ## [19] Biobase_2.66.0              MatrixGenerics_1.18.0      
+    ## [21] matrixStats_1.5.0           Rsamtools_2.22.0           
+    ## [23] Biostrings_2.74.1           XVector_0.46.0             
+    ## [25] GenomicRanges_1.58.0        GenomeInfoDb_1.42.1        
+    ## [27] IRanges_2.40.1              S4Vectors_0.44.0           
+    ## [29] BiocGenerics_0.52.0         lubridate_1.9.4            
+    ## [31] forcats_1.0.0               stringr_1.5.1              
+    ## [33] dplyr_1.1.4                 purrr_1.0.2                
+    ## [35] readr_2.1.5                 tidyr_1.3.1                
+    ## [37] tibble_3.2.1                ggplot2_3.5.1              
+    ## [39] tidyverse_2.0.0            
     ## 
     ## loaded via a namespace (and not attached):
-    ##   [1] ProtGenerics_1.32.0        bitops_1.0-7              
-    ##   [3] httr_1.4.6                 RColorBrewer_1.1-3        
-    ##   [5] doParallel_1.0.17          InteractionSet_1.28.1     
-    ##   [7] tools_4.3.1                doRNG_1.8.6               
-    ##   [9] backports_1.4.1            utf8_1.2.3                
-    ##  [11] R6_2.5.1                   HDF5Array_1.28.1          
-    ##  [13] mgcv_1.9-0                 lazyeval_0.2.2            
-    ##  [15] Gviz_1.44.0                rhdf5filters_1.12.1       
-    ##  [17] GetoptLong_1.0.5           withr_2.5.0               
-    ##  [19] prettyunits_1.1.1          gridExtra_2.3             
-    ##  [21] base64_2.0.1               VennDiagram_1.7.3         
-    ##  [23] cli_3.6.1                  formatR_1.14              
-    ##  [25] labeling_0.4.2             genefilter_1.82.1         
-    ##  [27] askpass_1.1                foreign_0.8-84            
-    ##  [29] siggenes_1.74.0            illuminaio_0.42.0         
-    ##  [31] dichromat_2.0-0.1          scrime_1.3.5              
-    ##  [33] BSgenome_1.68.0            rstudioapi_0.15.0         
-    ##  [35] RSQLite_2.3.1              generics_0.1.3            
-    ##  [37] shape_1.4.6                BiocIO_1.10.0             
-    ##  [39] vroom_1.6.3                Matrix_1.6-1              
-    ##  [41] interp_1.1-4               futile.logger_1.4.3       
-    ##  [43] fansi_1.0.4                abind_1.4-5               
-    ##  [45] lifecycle_1.0.3            yaml_2.3.7                
-    ##  [47] rhdf5_2.44.0               BiocFileCache_2.8.0       
-    ##  [49] grid_4.3.1                 blob_1.2.4                
-    ##  [51] crayon_1.5.2               lattice_0.21-8            
-    ##  [53] ComplexUpset_1.3.3         GenomicFeatures_1.52.1    
-    ##  [55] annotate_1.78.0            KEGGREST_1.40.0           
-    ##  [57] pillar_1.9.0               knitr_1.43                
-    ##  [59] ComplexHeatmap_2.16.0      beanplot_1.3.1            
-    ##  [61] metapod_1.8.0              rjson_0.2.21              
-    ##  [63] codetools_0.2-19           data.table_1.14.8         
-    ##  [65] vctrs_0.6.3                png_0.1-8                 
-    ##  [67] gtable_0.3.3               cachem_1.0.8              
-    ##  [69] xfun_0.40                  S4Arrays_1.0.5            
-    ##  [71] survival_3.5-5             iterators_1.0.14          
-    ##  [73] GenomicInteractions_1.34.0 nlme_3.1-162              
-    ##  [75] bit64_4.0.5                progress_1.2.2            
-    ##  [77] filelock_1.0.2             rprojroot_2.0.3           
-    ##  [79] rpart_4.1.19               colorspace_2.1-0          
-    ##  [81] DBI_1.1.3                  Hmisc_5.1-0               
-    ##  [83] nnet_7.3-19                tidyselect_1.2.0          
-    ##  [85] bit_4.0.5                  compiler_4.3.1            
-    ##  [87] curl_5.0.2                 htmlTable_2.4.1           
-    ##  [89] xml2_1.3.5                 DelayedArray_0.26.7       
-    ##  [91] checkmate_2.2.0            quadprog_1.5-8            
-    ##  [93] rappdirs_0.3.3             digest_0.6.33             
-    ##  [95] rmarkdown_2.24             GEOquery_2.68.0           
-    ##  [97] htmltools_0.5.6            pkgconfig_2.0.3           
-    ##  [99] jpeg_0.1-10                base64enc_0.1-3           
-    ## [101] sparseMatrixStats_1.12.2   highr_0.10                
-    ## [103] dbplyr_2.3.3               fastmap_1.1.1             
-    ## [105] ensembldb_2.24.0           rlang_1.1.1               
-    ## [107] GlobalOptions_0.1.2        htmlwidgets_1.6.2         
-    ## [109] DelayedMatrixStats_1.22.5  EnrichedHeatmap_1.30.0    
-    ## [111] farver_2.1.1               VariantAnnotation_1.46.0  
-    ## [113] RCurl_1.98-1.12            Formula_1.2-5             
-    ## [115] GenomeInfoDbData_1.2.10    Rhdf5lib_1.22.0           
-    ## [117] munsell_0.5.0              Rcpp_1.0.11               
-    ## [119] stringi_1.7.12             zlibbioc_1.46.0           
-    ## [121] MASS_7.3-60                plyr_1.8.8                
-    ## [123] bumphunter_1.42.0          minfi_1.46.0              
-    ## [125] parallel_4.3.1             deldir_1.0-9              
-    ## [127] multtest_2.56.0            hms_1.1.3                 
-    ## [129] circlize_0.4.15            locfit_1.5-9.8            
-    ## [131] igraph_1.5.1               rngtools_1.5.2            
-    ## [133] biomaRt_2.56.1             futile.options_1.0.1      
-    ## [135] XML_3.99-0.14              evaluate_0.21             
-    ## [137] latticeExtra_0.6-30        biovizBase_1.48.0         
-    ## [139] lambda.r_1.2.4             tzdb_0.4.0                
-    ## [141] foreach_1.5.2              tweenr_2.0.2              
-    ## [143] MatrixModels_0.5-2         openssl_2.1.0             
-    ## [145] polyclip_1.10-4            reshape_0.8.9             
-    ## [147] clue_0.3-64                ggforce_0.4.1             
-    ## [149] broom_1.0.5                xtable_1.8-4              
-    ## [151] restfulr_0.0.15            AnnotationFilter_1.24.0   
-    ## [153] memoise_2.0.1              AnnotationDbi_1.62.2      
-    ## [155] GenomicAlignments_1.36.0   cluster_2.1.4             
-    ## [157] timechange_0.2.0
+    ##   [1] splines_4.4.0             BiocIO_1.16.0            
+    ##   [3] filelock_1.0.3            bitops_1.0-9             
+    ##   [5] polyclip_1.10-7           preprocessCore_1.68.0    
+    ##   [7] rpart_4.1.24              XML_3.99-0.18            
+    ##   [9] httr2_1.0.7               lifecycle_1.0.4          
+    ##  [11] doParallel_1.0.17         rprojroot_2.0.4          
+    ##  [13] ensembldb_2.30.0          lattice_0.22-6           
+    ##  [15] vroom_1.6.5               MASS_7.3-65              
+    ##  [17] base64_2.0.2              scrime_1.3.5             
+    ##  [19] backports_1.5.0           Hmisc_5.2-2              
+    ##  [21] minfi_1.52.1              rmarkdown_2.29           
+    ##  [23] yaml_2.3.10               metapod_1.14.0           
+    ##  [25] doRNG_1.8.6               askpass_1.2.1            
+    ##  [27] Gviz_1.50.0               DBI_1.2.3                
+    ##  [29] RColorBrewer_1.1-3        abind_1.4-8              
+    ##  [31] zlibbioc_1.52.0           quadprog_1.5-8           
+    ##  [33] AnnotationFilter_1.30.0   biovizBase_1.54.0        
+    ##  [35] RCurl_1.98-1.16           nnet_7.3-20              
+    ##  [37] VariantAnnotation_1.52.0  rappdirs_0.3.3           
+    ##  [39] tweenr_2.0.3              GenomeInfoDbData_1.2.13  
+    ##  [41] rentrez_1.2.3             genefilter_1.88.0        
+    ##  [43] MatrixModels_0.5-3        annotate_1.84.0          
+    ##  [45] DelayedMatrixStats_1.28.0 codetools_0.2-20         
+    ##  [47] DelayedArray_0.32.0       xml2_1.3.6               
+    ##  [49] ggforce_0.4.2             tidyselect_1.2.1         
+    ##  [51] UCSC.utils_1.2.0          farver_2.1.2             
+    ##  [53] beanplot_1.3.1            base64enc_0.1-3          
+    ##  [55] BiocFileCache_2.14.0      illuminaio_0.48.0        
+    ##  [57] GenomicAlignments_1.42.0  jsonlite_1.8.9           
+    ##  [59] multtest_2.62.0           Formula_1.2-5            
+    ##  [61] survival_3.8-3            iterators_1.0.14         
+    ##  [63] foreach_1.5.2             progress_1.2.3           
+    ##  [65] tools_4.4.0               Rcpp_1.0.13-1            
+    ##  [67] gridExtra_2.3             SparseArray_1.6.0        
+    ##  [69] xfun_0.50                 mgcv_1.9-1               
+    ##  [71] HDF5Array_1.34.0          withr_3.0.2              
+    ##  [73] fastmap_1.2.0             latticeExtra_0.6-30      
+    ##  [75] rhdf5filters_1.18.0       SparseM_1.84-2           
+    ##  [77] openssl_2.3.1             digest_0.6.37            
+    ##  [79] timechange_0.3.0          R6_2.5.1                 
+    ##  [81] colorspace_2.1-1          jpeg_0.1-10              
+    ##  [83] dichromat_2.0-0.1         biomaRt_2.62.0           
+    ##  [85] RSQLite_2.3.9             generics_0.1.3           
+    ##  [87] data.table_1.16.4         htmlwidgets_1.6.4        
+    ##  [89] prettyunits_1.2.0         InteractionSet_1.34.0    
+    ##  [91] httr_1.4.7                S4Arrays_1.6.0           
+    ##  [93] pkgconfig_2.0.3           gtable_0.3.6             
+    ##  [95] blob_1.2.4                siggenes_1.80.0          
+    ##  [97] htmltools_0.5.8.1         ProtGenerics_1.38.0      
+    ##  [99] png_0.1-8                 knitr_1.49               
+    ## [101] rstudioapi_0.17.1         tzdb_0.4.0               
+    ## [103] rjson_0.2.23              checkmate_2.3.2          
+    ## [105] nlme_3.1-166              curl_6.1.0               
+    ## [107] bumphunter_1.48.0         cachem_1.1.0             
+    ## [109] rhdf5_2.50.1              parallel_4.4.0           
+    ## [111] foreign_0.8-89            AnnotationDbi_1.68.0     
+    ## [113] restfulr_0.0.15           GEOquery_2.74.0          
+    ## [115] pillar_1.10.1             grid_4.4.0               
+    ## [117] reshape_0.8.9             vctrs_0.6.5              
+    ## [119] dbplyr_2.5.0              cluster_2.1.8.1          
+    ## [121] xtable_1.8-4              htmlTable_2.4.3          
+    ## [123] evaluate_1.0.3            GenomicFeatures_1.58.0   
+    ## [125] cli_3.6.3                 locfit_1.5-9.10          
+    ## [127] compiler_4.4.0            rlang_1.1.4              
+    ## [129] crayon_1.5.3              rngtools_1.5.2           
+    ## [131] labeling_0.4.3            nor1mix_1.3-3            
+    ## [133] interp_1.1-6              plyr_1.8.9               
+    ## [135] stringi_1.8.4             deldir_2.0-4             
+    ## [137] munsell_0.5.1             lazyeval_0.2.2           
+    ## [139] quantreg_5.99.1           Matrix_1.7-1             
+    ## [141] BSgenome_1.74.0           hms_1.1.3                
+    ## [143] sparseMatrixStats_1.18.0  bit64_4.5.2              
+    ## [145] Rhdf5lib_1.28.0           KEGGREST_1.46.0          
+    ## [147] statmod_1.5.0             memoise_2.0.1            
+    ## [149] bit_4.5.0.1
 
 # References
 
-<div id="refs" class="references csl-bib-body hanging-indent">
+<div id="refs" class="references csl-bib-body hanging-indent"
+entry-spacing="0">
 
 <div id="ref-edgeR2016" class="csl-entry">
 
